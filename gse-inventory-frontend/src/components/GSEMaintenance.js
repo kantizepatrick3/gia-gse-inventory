@@ -236,7 +236,11 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     target_hours: '',
     months_interval: '',
     service_interval_months: '',
-    service_interval_years: 1
+    service_interval_years: 1,
+    // NEW: Checklist for services
+    selectedServices: [],
+    customService: '',
+    customServices: []
   });
 
   const [editData, setEditData] = useState({
@@ -460,6 +464,14 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         return;
       }
       
+      // Validate that at least one service is selected
+      if (!serviceData.service_performed || serviceData.service_performed.trim() === '') {
+        setError('Please select at least one service performed.');
+        setTimeout(() => setError(''), 3000);
+        setLoading(false);
+        return;
+      }
+      
       const payload = {
         service_performed: serviceData.service_performed,
         technician_name: serviceData.technician_name,
@@ -485,7 +497,10 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         target_hours: '',
         months_interval: '',
         service_interval_months: '',
-        service_interval_years: 1
+        service_interval_years: 1,
+        selectedServices: [],
+        customService: '',
+        customServices: []
       });
       fetchEquipment();
       if (onMaintenanceUpdate) onMaintenanceUpdate();
@@ -795,7 +810,20 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                     {eq.maintenance_type === 'hour' && (<button onClick={() => { setHoursUpdate({[eq.id]: eq.current_hours || 0}); setShowHoursModal(eq); }} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📝 Update Hours</button>)}
                     <button onClick={() => { setShowAttachmentsModal(eq); fetchAttachments(eq.id); }} style={{ backgroundColor: '#9b59b6', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📎 Files</button>
                     <button onClick={() => openEditModal(eq)} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>✏️ Edit</button>
-                    {!isNoMaintenance && (<button onClick={() => { setShowServiceForm(eq); setServiceData({ ...serviceData, service_date: new Date().toISOString().split('T')[0], current_hours: eq.current_hours || 0, target_hours: eq.target_hours || eq.service_interval_hours || 0, months_interval: '', service_interval_months: '' }); }} style={{ backgroundColor: '#3498db', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>🔧 Record Service</button>)}
+                    {!isNoMaintenance && (<button onClick={() => { 
+                      setShowServiceForm(eq); 
+                      setServiceData({ 
+                        ...serviceData, 
+                        service_date: new Date().toISOString().split('T')[0], 
+                        current_hours: eq.current_hours || 0, 
+                        target_hours: eq.target_hours || eq.service_interval_hours || 0, 
+                        months_interval: '', 
+                        service_interval_months: '',
+                        selectedServices: [],
+                        customService: '',
+                        customServices: []
+                      }); 
+                    }} style={{ backgroundColor: '#3498db', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>🔧 Record Service</button>)}
                     {canDelete && (<button onClick={() => handleDeleteEquipment(eq.id, eq.equipment_name)} style={{ backgroundColor: '#e74c3c', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', cursor: 'pointer' }}>🗑️ Delete</button>)}
                   </td>
                 </tr>
@@ -964,23 +992,66 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         </div>
       )}
 
-      {/* Record Service Modal */}
+      {/* Record Service Modal - UPDATED WITH CHECKLIST */}
       {showServiceForm && showServiceForm.maintenance_type !== 'none' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '650px', maxWidth: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '750px', maxWidth: '95%', maxHeight: '90vh', overflowY: 'auto' }}>
             <h3>🔧 Record Service for: {showServiceForm.equipment_name}</h3>
             <p>Maintenance Type: <strong>{getMaintenanceTypeIcon(showServiceForm)}</strong></p>
             <form onSubmit={(e) => handleRecordService(e, showServiceForm.id)}>
-              <div style={{ marginBottom: '20px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Service Date *</label><input type="date" required value={serviceData.service_date} onChange={(e) => setServiceData({...serviceData, service_date: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /><small style={{ color: '#666' }}>Date when service was performed</small></div>
+              {/* Service Date */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Service Date *</label>
+                <input 
+                  type="date" 
+                  required 
+                  value={serviceData.service_date} 
+                  onChange={(e) => setServiceData({...serviceData, service_date: e.target.value})} 
+                  style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
+                />
+                <small style={{ color: '#666' }}>Date when service was performed</small>
+              </div>
               
+              {/* Hour-based fields */}
               {showServiceForm.maintenance_type === 'hour' && (
                 <>
-                  <div style={{ marginBottom: '20px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>⏱️ Current Hours (Meter Reading)</label><input type="number" value={serviceData.current_hours} onChange={(e) => setServiceData({...serviceData, current_hours: e.target.value})} placeholder="Enter current meter reading" style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /><small style={{ color: '#666' }}>Current hour meter reading at time of service</small></div>
-                  <div style={{ marginBottom: '20px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>🎯 Target Hours (Next service at X hours)</label><input type="number" value={serviceData.target_hours} onChange={(e) => setServiceData({...serviceData, target_hours: e.target.value})} placeholder="Enter target hours for next service" style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /><small style={{ color: '#666' }}>Example: 600 hours - system will compare current vs target</small></div>
-                  <div style={{ marginBottom: '20px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Months Interval (Optional - for date-based condition)</label><input type="number" value={serviceData.months_interval} onChange={(e) => setServiceData({...serviceData, months_interval: e.target.value})} placeholder="Enter months for date-based condition" style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /><small style={{ color: '#666' }}>Example: 6 months - next service date will be calculated automatically</small></div>
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>⏱️ Current Hours (Meter Reading)</label>
+                    <input 
+                      type="number" 
+                      value={serviceData.current_hours} 
+                      onChange={(e) => setServiceData({...serviceData, current_hours: e.target.value})} 
+                      placeholder="Enter current meter reading" 
+                      style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
+                    />
+                    <small style={{ color: '#666' }}>Current hour meter reading at time of service</small>
+                  </div>
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>🎯 Target Hours (Next service at X hours)</label>
+                    <input 
+                      type="number" 
+                      value={serviceData.target_hours} 
+                      onChange={(e) => setServiceData({...serviceData, target_hours: e.target.value})} 
+                      placeholder="Enter target hours for next service" 
+                      style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
+                    />
+                    <small style={{ color: '#666' }}>Example: 600 hours - system will compare current vs target</small>
+                  </div>
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Months Interval (Optional - for date-based condition)</label>
+                    <input 
+                      type="number" 
+                      value={serviceData.months_interval} 
+                      onChange={(e) => setServiceData({...serviceData, months_interval: e.target.value})} 
+                      placeholder="Enter months for date-based condition" 
+                      style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
+                    />
+                    <small style={{ color: '#666' }}>Example: 6 months - next service date will be calculated automatically</small>
+                  </div>
                 </>
               )}
               
+              {/* Month-based fields */}
               {showServiceForm.maintenance_type === 'month' && (
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Service Interval (months) *</label>
@@ -1009,26 +1080,308 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </div>
               )}
               
+              {/* Year-based fields */}
               {showServiceForm.maintenance_type === 'year' && (
-                <div style={{ marginBottom: '20px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>Service Interval (years)</label><input type="number" value={serviceData.service_interval_years} onChange={(e) => setServiceData({...serviceData, service_interval_years: e.target.value})} placeholder={`Current: ${showServiceForm.service_interval_years || 1} years`} style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /></div>
-              )}
-              
-              {showServiceForm.maintenance_type === 'month' && (
-                <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#e8f4fd', borderRadius: '8px', border: '2px solid #2196f3' }}>
-                  <strong style={{ fontSize: '14px' }}>📋 Calculation Preview:</strong><br />
-                  <span style={{ fontSize: '13px' }}>Service Date: <strong>{serviceData.service_date}</strong><br />Interval: <strong>{serviceData.months_interval || '?'}</strong> months<br />→ Next service due on: <strong>{getMonthPreview(serviceData.service_date, serviceData.months_interval)}</strong></span>
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📆 Service Interval (years)</label>
+                  <input 
+                    type="number" 
+                    value={serviceData.service_interval_years} 
+                    onChange={(e) => setServiceData({...serviceData, service_interval_years: e.target.value})} 
+                    placeholder={`Current: ${showServiceForm.service_interval_years || 1} years`} 
+                    style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
+                  />
                 </div>
               )}
               
-              <div style={{ marginBottom: '15px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Service Performed *</label><input type="text" required value={serviceData.service_performed} onChange={(e) => setServiceData({...serviceData, service_performed: e.target.value})} placeholder="e.g., Oil change, Inspection, Calibration" style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /></div>
-              
-              <div style={{ marginBottom: '15px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Technician Name</label><input type="text" value={serviceData.technician_name} onChange={(e) => setServiceData({...serviceData, technician_name: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /></div>
-              
-              <div style={{ marginBottom: '15px' }}><label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Notes</label><textarea value={serviceData.notes} onChange={(e) => setServiceData({...serviceData, notes: e.target.value})} rows="2" style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} /></div>
-              
+              {/* Month-based Preview */}
+              {showServiceForm.maintenance_type === 'month' && (
+                <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#e8f4fd', borderRadius: '8px', border: '2px solid #2196f3' }}>
+                  <strong style={{ fontSize: '14px' }}>📋 Calculation Preview:</strong><br />
+                  <span style={{ fontSize: '13px' }}>
+                    Service Date: <strong>{serviceData.service_date}</strong>
+                    <br />Interval: <strong>{serviceData.months_interval || '?'}</strong> months
+                    <br />→ Next service due on: <strong>{getMonthPreview(serviceData.service_date, serviceData.months_interval)}</strong>
+                  </span>
+                </div>
+              )}
+
+              {/* ============================================================
+                  SERVICE CHECKLIST - Checkbox list with custom option
+              ============================================================ */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                  🔧 Services Performed * (Select all that apply)
+                </label>
+                
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr', 
+                  gap: '8px',
+                  padding: '15px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '6px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  {/* Pre-defined service checklist */}
+                  {[
+                    'Inspection',
+                    'Testing',
+                    'Cleaning',
+                    'Calibration',
+                    'Replacement',
+                    'Repair',
+                    'Maintenance',
+                    'Check Pressure',
+                    'Check Date',
+                    'Visual Inspection',
+                    'Functional Test',
+                    'Safety Check',
+                    'Oil Change',
+                    'Filter Replacement',
+                    'Brake Inspection',
+                    'Tire Check',
+                    'Battery Test',
+                    'Hydraulic Fluid Check',
+                    'Electrical System Check',
+                    'Cooling System Check',
+                    'Lubrication',
+                    'Parts Replacement'
+                  ].map(service => (
+                    <label key={service} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      padding: '5px 10px',
+                      borderRadius: '4px',
+                      backgroundColor: serviceData.selectedServices?.includes(service) ? '#e3f2fd' : 'transparent',
+                      transition: 'background-color 0.2s',
+                      fontSize: '13px'
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={serviceData.selectedServices?.includes(service) || false}
+                        onChange={(e) => {
+                          const isChecked = e.target.checked;
+                          setServiceData(prev => {
+                            let updatedServices = [...(prev.selectedServices || [])];
+                            if (isChecked) {
+                              updatedServices.push(service);
+                            } else {
+                              updatedServices = updatedServices.filter(s => s !== service);
+                            }
+                            // Update service_performed as comma-separated string
+                            const allServices = [...updatedServices];
+                            if (prev.customServices && prev.customServices.length > 0) {
+                              allServices.push(...prev.customServices);
+                            }
+                            return {
+                              ...prev,
+                              selectedServices: updatedServices,
+                              service_performed: allServices.join(', ')
+                            };
+                          });
+                        }}
+                      />
+                      <span>{service}</span>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Custom Service Input */}
+                <div style={{ 
+                  marginTop: '12px',
+                  display: 'flex',
+                  gap: '10px',
+                  alignItems: 'center'
+                }}>
+                  <input
+                    type="text"
+                    value={serviceData.customService || ''}
+                    onChange={(e) => setServiceData(prev => ({
+                      ...prev,
+                      customService: e.target.value
+                    }))}
+                    placeholder="Enter custom service not listed above..."
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '4px',
+                      border: '1px solid #ddd',
+                      fontSize: '13px'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const customService = serviceData.customService?.trim();
+                      if (customService) {
+                        setServiceData(prev => {
+                          const updatedCustom = [...(prev.customServices || []), customService];
+                          const allServices = [...(prev.selectedServices || []), ...updatedCustom];
+                          return {
+                            ...prev,
+                            customServices: updatedCustom,
+                            customService: '',
+                            service_performed: allServices.join(', ')
+                          };
+                        });
+                      }
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    + Add Custom
+                  </button>
+                </div>
+
+                {/* Display custom services added */}
+                {serviceData.customServices && serviceData.customServices.length > 0 && (
+                  <div style={{ marginTop: '10px' }}>
+                    <small style={{ color: '#666' }}>Custom services added:</small>
+                    <div style={{ marginTop: '5px' }}>
+                      {serviceData.customServices.map((svc, idx) => (
+                        <span key={idx} style={{
+                          display: 'inline-block',
+                          backgroundColor: '#e8f5e9',
+                          color: '#2e7d32',
+                          padding: '3px 10px',
+                          borderRadius: '12px',
+                          margin: '3px 5px 3px 0',
+                          fontSize: '12px',
+                          fontWeight: '500'
+                        }}>
+                          {svc}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setServiceData(prev => {
+                                const updatedCustom = prev.customServices.filter((_, i) => i !== idx);
+                                const allServices = [...(prev.selectedServices || []), ...updatedCustom];
+                                return {
+                                  ...prev,
+                                  customServices: updatedCustom,
+                                  service_performed: allServices.join(', ')
+                                };
+                              });
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#c62828',
+                              cursor: 'pointer',
+                              marginLeft: '5px',
+                              fontSize: '14px',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Summary of selected services */}
+                {serviceData.service_performed && (
+                  <div style={{ 
+                    marginTop: '10px',
+                    padding: '10px',
+                    backgroundColor: '#e3f2fd',
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    border: '1px solid #bbdefb'
+                  }}>
+                    <strong>✅ Selected Services:</strong> {serviceData.service_performed}
+                  </div>
+                )}
+              </div>
+
+              {/* Technician Name */}
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>👨‍🔧 Technician Name</label>
+                <input 
+                  type="text" 
+                  value={serviceData.technician_name} 
+                  onChange={(e) => setServiceData({...serviceData, technician_name: e.target.value})} 
+                  placeholder="Enter technician name"
+                  style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
+                />
+              </div>
+
+              {/* Notes */}
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>📝 Notes</label>
+                <textarea 
+                  value={serviceData.notes} 
+                  onChange={(e) => setServiceData({...serviceData, notes: e.target.value})} 
+                  rows="2" 
+                  placeholder="Additional notes about service"
+                  style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
+                />
+              </div>
+
+              {/* Buttons */}
               <div style={{ display: 'flex', gap: '15px', marginTop: '20px' }}>
-                <button type="submit" disabled={loading} style={{ backgroundColor: '#27ae60', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '5px', cursor: 'pointer', flex: 1, fontSize: '16px', fontWeight: 'bold' }}>{loading ? 'Saving...' : '✅ Record Service'}</button>
-                <button type="button" onClick={() => { setShowServiceForm(null); setServiceData({ service_performed: '', technician_name: '', notes: '', service_date: new Date().toISOString().split('T')[0], current_hours: '', target_hours: '', months_interval: '', service_interval_months: '', service_interval_years: 1 }); }} style={{ backgroundColor: '#95a5a6', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '5px', cursor: 'pointer', fontSize: '16px' }}>Cancel</button>
+                <button 
+                  type="submit" 
+                  disabled={loading} 
+                  style={{ 
+                    backgroundColor: '#27ae60', 
+                    color: 'white', 
+                    border: 'none', 
+                    padding: '12px 24px', 
+                    borderRadius: '5px', 
+                    cursor: loading ? 'not-allowed' : 'pointer', 
+                    flex: 1, 
+                    fontSize: '16px', 
+                    fontWeight: 'bold',
+                    opacity: loading ? 0.6 : 1
+                  }}
+                >
+                  {loading ? '⏳ Saving...' : '✅ Record Service'}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => { 
+                    setShowServiceForm(null); 
+                    setServiceData({ 
+                      service_performed: '', 
+                      technician_name: '', 
+                      notes: '', 
+                      service_date: new Date().toISOString().split('T')[0], 
+                      current_hours: '', 
+                      target_hours: '', 
+                      months_interval: '', 
+                      service_interval_months: '', 
+                      service_interval_years: 1,
+                      selectedServices: [],
+                      customService: '',
+                      customServices: []
+                    }); 
+                  }} 
+                  style={{ 
+                    backgroundColor: '#95a5a6', 
+                    color: 'white', 
+                    border: 'none', 
+                    padding: '12px 24px', 
+                    borderRadius: '5px', 
+                    cursor: 'pointer', 
+                    fontSize: '16px' 
+                  }}
+                >
+                  Cancel
+                </button>
               </div>
             </form>
           </div>
