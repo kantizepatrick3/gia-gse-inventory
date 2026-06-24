@@ -805,7 +805,9 @@ app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) =>
   }
 });
 
-// RECORD SERVICE
+// ============================================================
+// RECORD SERVICE - WITH PREVENTIVE VS CORRECTIVE HANDLING
+// ============================================================
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const {
@@ -815,7 +817,8 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     service_date,
     current_hours,
     target_hours,
-    months_interval
+    months_interval,
+    maintenance_category // 'preventive' or 'corrective'
   } = req.body;
 
   try {
@@ -829,110 +832,178 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     }
 
     const equipment = result.rows[0];
+    const isPreventive = maintenance_category === 'preventive';
+
     let nextServiceDate = null;
     let nextServiceYear = null;
     let status = 'serviced';
 
-    if (equipment.maintenance_type === 'hour') {
-      const intervalMonths = months_interval || equipment.service_interval_months_for_hour || 0;
-      if (intervalMonths > 0 && service_date) {
-        nextServiceDate = calculateNextServiceDate(service_date, intervalMonths);
+    // For Preventive: Update both last and next service dates
+    // For Corrective: Only update last service date, keep next_service_date unchanged
+    if (isPreventive) {
+      // PREVENTIVE: Update the schedule
+      if (equipment.maintenance_type === 'hour') {
+        const intervalMonths = months_interval || equipment.service_interval_months_for_hour || 0;
+        if (intervalMonths > 0 && service_date) {
+          nextServiceDate = calculateNextServiceDate(service_date, intervalMonths);
+        }
+        const newTargetHours = target_hours || equipment.target_hours || equipment.service_interval_hours || 0;
+        const newCurrentHours = current_hours || equipment.current_hours || 0;
+        
+        await db.execute({
+          sql: `
+            UPDATE gse_maintenance SET
+              last_service_date = ?,
+              last_service_hours = ?,
+              current_hours = ?,
+              target_hours = ?,
+              service_performed = ?,
+              technician_name = ?,
+              notes = ?,
+              next_service_date = ?,
+              service_interval_months_for_hour = ?,
+              maintenance_category = ?,
+              status = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          args: [
+            service_date,
+            current_hours || 0,
+            newCurrentHours,
+            newTargetHours,
+            service_performed || '',
+            technician_name || '',
+            notes || '',
+            nextServiceDate,
+            parseInt(intervalMonths) || 0,
+            'preventive',
+            status,
+            id
+          ]
+        });
+      } else if (equipment.maintenance_type === 'month') {
+        const intervalMonths = months_interval || equipment.service_interval_months || 0;
+        if (service_date && intervalMonths > 0) {
+          nextServiceDate = calculateNextServiceDate(service_date, intervalMonths);
+        }
+        
+        await db.execute({
+          sql: `
+            UPDATE gse_maintenance SET
+              last_service_date = ?,
+              service_performed = ?,
+              technician_name = ?,
+              notes = ?,
+              next_service_date = ?,
+              service_interval_months = ?,
+              maintenance_category = ?,
+              status = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          args: [
+            service_date,
+            service_performed || '',
+            technician_name || '',
+            notes || '',
+            nextServiceDate,
+            parseInt(intervalMonths) || 0,
+            'preventive',
+            status,
+            id
+          ]
+        });
+      } else if (equipment.maintenance_type === 'year') {
+        const currentYear = new Date(service_date).getFullYear();
+        const intervalYears = equipment.service_interval_years || 1;
+        nextServiceYear = currentYear + parseInt(intervalYears);
+        
+        await db.execute({
+          sql: `
+            UPDATE gse_maintenance SET
+              last_service_full_date = ?,
+              last_service_year = ?,
+              service_performed = ?,
+              technician_name = ?,
+              notes = ?,
+              next_service_year = ?,
+              maintenance_category = ?,
+              status = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          args: [
+            service_date,
+            currentYear,
+            service_performed || '',
+            technician_name || '',
+            notes || '',
+            nextServiceYear,
+            'preventive',
+            status,
+            id
+          ]
+        });
       }
-      const newTargetHours = target_hours || equipment.target_hours || equipment.service_interval_hours || 0;
-      const newCurrentHours = current_hours || equipment.current_hours || 0;
-      
-      await db.execute({
-        sql: `
-          UPDATE gse_maintenance SET
-            last_service_date = ?,
-            last_service_hours = ?,
-            current_hours = ?,
-            target_hours = ?,
-            service_performed = ?,
-            technician_name = ?,
-            notes = ?,
-            next_service_date = ?,
-            service_interval_months_for_hour = ?,
-            status = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        args: [
-          service_date,
-          current_hours || 0,
-          newCurrentHours,
-          newTargetHours,
-          service_performed || '',
-          technician_name || '',
-          notes || '',
-          nextServiceDate,
-          parseInt(intervalMonths) || 0,
-          status,
-          id
-        ]
-      });
-    } else if (equipment.maintenance_type === 'month') {
-      const intervalMonths = months_interval || equipment.service_interval_months || 0;
-      if (service_date && intervalMonths > 0) {
-        nextServiceDate = calculateNextServiceDate(service_date, intervalMonths);
+    } else {
+      // CORRECTIVE: Only update last_service_date, DO NOT change next_service_date
+      if (equipment.maintenance_type === 'hour') {
+        await db.execute({
+          sql: `
+            UPDATE gse_maintenance SET
+              last_service_date = ?,
+              last_service_hours = ?,
+              current_hours = ?,
+              service_performed = ?,
+              technician_name = ?,
+              notes = ?,
+              -- next_service_date stays the same
+              maintenance_category = ?,
+              status = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          args: [
+            service_date,
+            current_hours || 0,
+            current_hours || equipment.current_hours || 0,
+            service_performed || '',
+            technician_name || '',
+            notes || '',
+            'corrective',
+            status,
+            id
+          ]
+        });
+      } else if (equipment.maintenance_type === 'month' || equipment.maintenance_type === 'year') {
+        await db.execute({
+          sql: `
+            UPDATE gse_maintenance SET
+              last_service_date = ?,
+              service_performed = ?,
+              technician_name = ?,
+              notes = ?,
+              -- next_service_date stays the same
+              maintenance_category = ?,
+              status = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          args: [
+            service_date,
+            service_performed || '',
+            technician_name || '',
+            notes || '',
+            'corrective',
+            status,
+            id
+          ]
+        });
       }
-      
-      await db.execute({
-        sql: `
-          UPDATE gse_maintenance SET
-            last_service_date = ?,
-            service_performed = ?,
-            technician_name = ?,
-            notes = ?,
-            next_service_date = ?,
-            service_interval_months = ?,
-            status = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        args: [
-          service_date,
-          service_performed || '',
-          technician_name || '',
-          notes || '',
-          nextServiceDate,
-          parseInt(intervalMonths) || 0,
-          status,
-          id
-        ]
-      });
-    } else if (equipment.maintenance_type === 'year') {
-      const currentYear = new Date(service_date).getFullYear();
-      const intervalYears = equipment.service_interval_years || 1;
-      nextServiceYear = currentYear + parseInt(intervalYears);
-      
-      await db.execute({
-        sql: `
-          UPDATE gse_maintenance SET
-            last_service_full_date = ?,
-            last_service_year = ?,
-            service_performed = ?,
-            technician_name = ?,
-            notes = ?,
-            next_service_year = ?,
-            status = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        args: [
-          service_date,
-          currentYear,
-          service_performed || '',
-          technician_name || '',
-          notes || '',
-          nextServiceYear,
-          status,
-          id
-        ]
-      });
     }
 
-    // Record in service history
+    // Record in service history with category
     await db.execute({
       sql: `
         INSERT INTO service_history (
@@ -961,7 +1032,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         service_performed || '',
         technician_name || '',
         notes || '',
-        equipment.maintenance_category || 'preventive',
+        maintenance_category || 'preventive',
         current_hours || 0,
         target_hours || 0,
         parseInt(months_interval) || 0,
@@ -970,9 +1041,12 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       ]
     });
 
+    const categoryText = isPreventive ? 'Preventive' : 'Corrective';
+    const scheduleMsg = isPreventive ? ' (Next service date updated)' : ' (Preventive schedule unchanged)';
+    
     res.json({
       success: true,
-      message: '✅ Service recorded successfully!'
+      message: `✅ ${categoryText} service recorded successfully!${scheduleMsg}`
     });
   } catch (err) {
     console.error('Error recording service:', err.message);
@@ -1332,6 +1406,9 @@ const startServer = async () => {
       console.log(`   GET /api/service-history/all - All history with filters`);
       console.log(`   GET /api/service-history/equipment/:id - By equipment`);
       console.log(`   GET /api/service-history/stats - Statistics`);
+      console.log(`\n🔧 Maintenance Categories:`);
+      console.log(`   Preventive - Updates next_service_date`);
+      console.log(`   Corrective - Does NOT change next_service_date`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
