@@ -2,6 +2,181 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
+// ============================================================
+// MAINTENANCE INFO COMPONENT (Collapsible - Saves Space)
+// ============================================================
+const MaintenanceInfo = () => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div style={{ marginBottom: '15px' }}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          padding: '10px 20px',
+          backgroundColor: isOpen ? '#e8f4fd' : '#2196f3',
+          color: isOpen ? '#0d47a1' : 'white',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontWeight: 'bold',
+          fontSize: '14px',
+          width: '100%',
+          justifyContent: 'space-between',
+          transition: 'all 0.3s ease',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '18px' }}>📊</span>
+          {isOpen ? 'Hide Maintenance Information' : 'Show Maintenance Information'}
+        </span>
+        <span style={{ 
+          fontSize: '18px',
+          transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.3s ease'
+        }}>
+          ▼
+        </span>
+      </button>
+
+      {isOpen && (
+        <div style={{
+          marginTop: '10px',
+          padding: '20px',
+          backgroundColor: '#f0f7ff',
+          border: '1px solid #b3d4fc',
+          borderRadius: '8px',
+          animation: 'slideDown 0.3s ease'
+        }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '15px',
+            fontSize: '14px'
+          }}>
+            {/* Column 1 */}
+            <div>
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ color: '#0d47a1', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📅</span> Date Condition
+                </h4>
+                <p style={{ margin: '0 0 5px 20px', color: '#333', fontSize: '13px' }}>
+                  Enter service date + months interval
+                </p>
+                <p style={{ margin: '0 0 5px 20px', color: '#555', fontSize: '12px' }}>
+                  → Auto-calculates next service date
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ color: '#0d47a1', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>⏱️</span> Hours Condition
+                </h4>
+                <p style={{ margin: '0 0 5px 20px', color: '#333', fontSize: '13px' }}>
+                  Enter current hours + target hours
+                </p>
+                <p style={{ margin: '0 0 5px 20px', color: '#555', fontSize: '12px' }}>
+                  → System compares current vs target
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ color: '#0d47a1', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🔔</span> Alert System
+                </h4>
+                <p style={{ margin: '0 0 5px 20px', color: '#333', fontSize: '13px' }}>
+                  Triggers on whichever condition comes FIRST
+                </p>
+                <p style={{ margin: '0 0 5px 20px', color: '#555', fontSize: '12px' }}>
+                  (Date OR Hours condition)
+                </p>
+              </div>
+            </div>
+
+            {/* Column 2 */}
+            <div>
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ color: '#0d47a1', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📝</span> Daily Updates
+                </h4>
+                <p style={{ margin: '0 0 5px 20px', color: '#333', fontSize: '13px' }}>
+                  Use <strong>"Update Hours"</strong> button
+                </p>
+                <p style={{ margin: '0 0 5px 20px', color: '#555', fontSize: '12px' }}>
+                  Record daily meter readings
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ color: '#0d47a1', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📊</span> Status Indicators
+                </h4>
+                <div style={{ marginLeft: '20px' }}>
+                  <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}>
+                    <span style={{ color: '#f39c12', fontWeight: 'bold' }}>🟡 Due Soon:</span>
+                    <span style={{ color: '#555', fontSize: '12px', marginLeft: '5px' }}>
+                      ≤ 4 days to date OR ≤ 40 hours to target
+                    </span>
+                  </p>
+                  <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}>
+                    <span style={{ color: '#e74c3c', fontWeight: 'bold' }}>🔴 Overdue:</span>
+                    <span style={{ color: '#555', fontSize: '12px', marginLeft: '5px' }}>
+                      Date passed OR hours exceeded target
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ color: '#0d47a1', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📎</span> Attachments
+                </h4>
+                <p style={{ margin: '0 0 5px 20px', color: '#333', fontSize: '13px' }}>
+                  Click file to open in new tab
+                </p>
+              </div>
+
+              <div>
+                <h4 style={{ color: '#0d47a1', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📅</span> Month-based Maintenance
+                </h4>
+                <p style={{ margin: '0 0 5px 20px', color: '#333', fontSize: '13px' }}>
+                  Enter custom number of months
+                </p>
+                <p style={{ margin: '0 0 5px 20px', color: '#555', fontSize: '12px' }}>
+                  (1, 2, 3, 4, 6, 12, etc.) - NO fixed default
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>
+        {`
+          @keyframes slideDown {
+            from {
+              opacity: 0;
+              transform: translateY(-10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}
+      </style>
+    </div>
+  );
+};
+
+// ============================================================
+// MAIN GSEMAINTENANCE COMPONENT
+// ============================================================
 const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   const [equipment, setEquipment] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -525,19 +700,10 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         <button onClick={() => setMaintenanceTypeFilter('none')} style={{ backgroundColor: maintenanceTypeFilter === 'none' ? '#3498db' : '#95a5a6', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px' }}>⭕ No Maintenance</button>
       </div>
 
-      <div style={{ backgroundColor: '#d1ecf1', padding: '10px', borderRadius: '5px', marginBottom: '20px', border: '1px solid #bee5eb' }}>
-        <p style={{ margin: 0, fontSize: '13px' }}>
-          <strong>📊 Dual Condition Hour-based Maintenance:</strong><br />
-          📅 <strong>Date Condition:</strong> Enter service date + months interval → Auto-calculates next service date<br />
-          ⏱️ <strong>Hours Condition:</strong> Enter current hours + target hours → System compares current vs target<br />
-          🔔 <strong>Alert:</strong> Triggers on whichever condition comes FIRST (date OR hours)<br />
-          📝 <strong>Daily Update:</strong> Use "Update Hours" button to record daily meter readings<br />
-          🟡 <strong>Due Soon:</strong> ≤ 4 days to date OR ≤ 40 hours to target<br />
-          🔴 <strong>Overdue:</strong> Date passed OR hours exceeded target<br />
-          📎 <strong>Attachments:</strong> Click file to open in new tab<br />
-          📅 <strong>Month-based:</strong> Enter custom number of months (1, 2, 3, 4, 6, 12, etc.) - NO fixed default
-        </p>
-      </div>
+      {/* ============================================================
+          NEW COLLAPSIBLE INFO BUTTON - REPLACES THE OLD INFO BOX
+      ============================================================ */}
+      <MaintenanceInfo />
 
       {message && <div style={{ backgroundColor: '#d4edda', color: '#155724', padding: '10px', borderRadius: '5px', margin: '10px 0', border: '1px solid #c3e6cb', whiteSpace: 'pre-line' }}>{message}</div>}
       {error && <div style={{ backgroundColor: '#f8d7da', color: '#721c24', padding: '10px', borderRadius: '5px', margin: '10px 0', border: '1px solid #f5c6cb' }}>{error}</div>}
@@ -620,9 +786,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   <td style={{ border: '1px solid #ddd', padding: '8px' }}>{getMaintenanceTypeIcon(eq)}</td>
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px' }}>{eq.current_service_display || eq.last_service_date || eq.last_service_year || 'Not recorded'}</td>
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px' }}>{eq.maintenance_type === 'hour' && `${eq.current_hours || 0} / ${eq.target_hours || eq.service_interval_hours || 0} hrs`}{eq.maintenance_type !== 'hour' && '-'}</td>
-                  {/* ============================================================
-                  FIXED: Next Service column using formatDate
-                  ============================================================ */}
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', fontWeight: 'bold', color: statusStyle.color === '#e74c3c' ? '#e74c3c' : (statusStyle.color === '#f39c12' ? '#f39c12' : '#0066cc') }}>
                     {formatDate(eq.next_service_date)}
                   </td>
