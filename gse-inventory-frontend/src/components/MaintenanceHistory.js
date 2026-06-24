@@ -68,6 +68,35 @@ const MaintenanceHistory = ({ token }) => {
     return colors[status] || '#95a5a6';
   };
 
+  // ============================================================
+  // NEW: Get category badge for Preventive/Corrective
+  // ============================================================
+  const getCategoryBadge = (category) => {
+    if (!category) return null;
+    const cat = category.toLowerCase();
+    if (cat === 'preventive') {
+      return {
+        bg: '#e8f5e9',
+        color: '#2e7d32',
+        text: '🛡️ Preventive',
+        border: '#a5d6a7'
+      };
+    } else if (cat === 'corrective') {
+      return {
+        bg: '#fce4ec',
+        color: '#c62828',
+        text: '🔧 Corrective',
+        border: '#ef9a9a'
+      };
+    }
+    return {
+      bg: '#e9ecef',
+      color: '#6c757d',
+      text: category || 'Unknown',
+      border: '#ced4da'
+    };
+  };
+
   const filteredEquipment = equipment.filter(item => {
     if (filter !== 'all' && item.status !== filter) return false;
     if (searchTerm && !item.equipment_name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
@@ -83,11 +112,12 @@ const MaintenanceHistory = ({ token }) => {
     setExportLoading(true);
     
     try {
-      const headers = ['Service Date', 'Service Performed', 'Technician', 'Hours at Service', 'Next Service Due', 'Interval (Months)', 'Notes'];
+      const headers = ['Service Date', 'Service Performed', 'Technician', 'Category', 'Hours at Service', 'Next Service Due', 'Interval (Months)', 'Notes'];
       const rows = history.map(h => [
         h.service_date || '',
         h.service_performed || '',
         h.technician || '',
+        h.category || 'Not specified',
         h.hours_at_service || 0,
         h.next_service_due || '',
         h.interval_months || 0,
@@ -154,7 +184,7 @@ const MaintenanceHistory = ({ token }) => {
 
   return (
     <div className="maintenance-history-container">
-      <h2>Maintenance History</h2>
+      <h2>📋 Maintenance History</h2>
       
       <div className="filters">
         <div className="filter-group">
@@ -242,6 +272,7 @@ const MaintenanceHistory = ({ token }) => {
                   <th>Service Date</th>
                   <th>Service Performed</th>
                   <th>Technician</th>
+                  <th>Category</th>
                   <th>Hours at Service</th>
                   <th>Next Service Due</th>
                   <th>Interval (Months)</th>
@@ -249,18 +280,30 @@ const MaintenanceHistory = ({ token }) => {
                 </tr>
               </thead>
               <tbody>
-                {history.map((h, index) => (
-                  <tr key={index}>
-                    <td>{index + 1}</td>
-                    <td>{h.service_date || 'N/A'}</td>
-                    <td>{h.service_performed || 'Maintenance recorded'}</td>
-                    <td>{h.technician || 'System'}</td>
-                    <td>{h.hours_at_service || 0}</td>
-                    <td>{h.next_service_due || 'TBD'}</td>
-                    <td>{h.interval_months || 0}</td>
-                    <td>{h.notes || ''}</td>
-                  </tr>
-                ))}
+                {history.map((h, index) => {
+                  const categoryBadge = getCategoryBadge(h.category);
+                  return (
+                    <tr key={index}>
+                      <td>{index + 1}</td>
+                      <td>{h.service_date || 'N/A'}</td>
+                      <td>{h.service_performed || 'Maintenance recorded'}</td>
+                      <td>{h.technician || 'System'}</td>
+                      <td>
+                        {categoryBadge ? (
+                          <span className={`category-badge category-badge-${h.category ? h.category.toLowerCase() : 'unknown'}`}>
+                            {categoryBadge.text}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#6c757d', fontSize: '12px' }}>Not specified</span>
+                        )}
+                      </td>
+                      <td>{h.hours_at_service || 0}</td>
+                      <td>{h.next_service_due || 'TBD'}</td>
+                      <td>{h.interval_months || 0}</td>
+                      <td>{h.notes || ''}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
