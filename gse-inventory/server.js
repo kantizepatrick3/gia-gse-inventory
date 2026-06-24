@@ -9,24 +9,31 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const SECRET_KEY = 'gse_inventory_secret_key_2024';
 
+// ========== CORS CONFIGURATION - FIXED ==========
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5000',
   'https://gse-frontend.onrender.com',
   'https://casgseinv.onrender.com',
   'https://gse-backend.onrender.com',
-  'https://cas-backend.onrender.com'
+  'https://cas-backend.onrender.com',
+  'https://giagse.onrender.com',
+  'https://gia-gse-inventory.onrender.com'
 ];
 
 app.use(cors({
   origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error('CORS policy does not allow this origin'), false);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn('CORS blocked origin:', origin);
+      callback(new Error('CORS policy does not allow this origin'), false);
     }
-    return callback(null, true);
   },
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
 
 app.use(express.json({ limit: '50mb' }));
@@ -415,6 +422,26 @@ const calculateYearStatus = (lastServiceFullDate, intervalYears) => {
     daysRemaining: daysRemaining > 0 ? daysRemaining : 0
   };
 };
+
+// ========== HEALTH CHECK ENDPOINT ==========
+app.get('/api/health', async (req, res) => {
+  try {
+    await db.execute('SELECT 1');
+    res.json({ 
+      status: 'ok', 
+      database: 'connected', 
+      message: 'GIA GSE Inventory API is running',
+      version: '1.0.0',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'error', 
+      database: 'disconnected', 
+      error: error.message 
+    });
+  }
+});
 
 // ========== LOGIN ==========
 app.post('/api/login', async (req, res) => {
