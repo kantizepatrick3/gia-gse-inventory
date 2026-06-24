@@ -194,9 +194,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   const [hoursUpdate, setHoursUpdate] = useState({});
   const [showHoursModal, setShowHoursModal] = useState(null);
   
-  // ============================================================
-  // CRITICAL FIX: Helper function to format date
-  // ============================================================
   const formatDate = (dateString) => {
     if (!dateString) return 'Not scheduled';
     try {
@@ -237,8 +234,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     months_interval: '',
     service_interval_months: '',
     service_interval_years: 1,
-    // NEW: Maintenance category
-    maintenance_category: 'preventive', // 'preventive' or 'corrective'
+    maintenance_category: 'preventive',
     selectedServices: [],
     customService: '',
     customServices: []
@@ -259,9 +255,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     last_service_year: null
   });
 
-  // ============================================================
-  // CRITICAL FIX: Use GIA backend URL (NOT CAS)
-  // ============================================================
   const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   useEffect(() => {
@@ -278,20 +271,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       const response = await axios.get(`${API_URL}/api/gse-maintenance`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('🔧 Fetching maintenance data from:', `${API_URL}/api/gse-maintenance`);
-      console.log('🔧 Full API response:', response.data);
-      console.log('🔧 Response type:', typeof response.data);
-      console.log('🔧 Has equipment property?', !!response.data.equipment);
-      console.log('🔧 Success status:', response.data.success);
-      
-      if (response.data.equipment) {
-        console.log('✅ Found equipment array in response.data.equipment');
-        console.log('🔧 Setting equipment data:', response.data.equipment.length, 'records');
-        console.log('🔧 Sample equipment record:', response.data.equipment[0]);
-        console.log('🔧 Available fields:', Object.keys(response.data.equipment[0] || {}));
-        console.log('🔧 First equipment name:', response.data.equipment[0]?.equipment_name);
-        console.log('🔧 Status:', response.data.equipment[0]?.status);
-      }
       setEquipment(response.data.equipment || []);
     } catch (err) {
       console.error('Error fetching equipment:', err);
@@ -465,7 +444,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         return;
       }
       
-      // Validate that at least one service is selected
       if (!serviceData.service_performed || serviceData.service_performed.trim() === '') {
         setError('Please select at least one service performed.');
         setTimeout(() => setError(''), 3000);
@@ -481,7 +459,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         current_hours: serviceData.current_hours,
         target_hours: serviceData.target_hours,
         months_interval: serviceData.months_interval,
-        // NEW: Send maintenance category
         maintenance_category: serviceData.maintenance_category || 'preventive'
       };
       
@@ -552,8 +529,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
           payload.next_service_date = nextDate.toISOString().split('T')[0];
         }
       }
-      
-      console.log('📝 Updating equipment with payload:', payload);
       
       const response = await axios.put(`${API_URL}/api/gse-maintenance/${editData.id}`, payload, {
         headers: { Authorization: `Bearer ${token}` }
@@ -719,9 +694,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         <button onClick={() => setMaintenanceTypeFilter('none')} style={{ backgroundColor: maintenanceTypeFilter === 'none' ? '#3498db' : '#95a5a6', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px' }}>⭕ No Maintenance</button>
       </div>
 
-      {/* ============================================================
-          NEW COLLAPSIBLE INFO BUTTON - REPLACES THE OLD INFO BOX
-      ============================================================ */}
       <MaintenanceInfo />
 
       {message && <div style={{ backgroundColor: '#d4edda', color: '#155724', padding: '10px', borderRadius: '5px', margin: '10px 0', border: '1px solid #c3e6cb', whiteSpace: 'pre-line' }}>{message}</div>}
@@ -998,7 +970,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       )}
 
       {/* ============================================================
-          RECORD SERVICE MODAL - WITH PREVENTIVE/CORRECTIVE SELECTION
+          RECORD SERVICE MODAL - Corrective hides all interval fields
       ============================================================ */}
       {showServiceForm && showServiceForm.maintenance_type !== 'none' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
@@ -1020,9 +992,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 <small style={{ color: '#666' }}>Date when service was performed</small>
               </div>
 
-              {/* ============================================================
-                  MAINTENANCE CATEGORY - Preventive or Corrective
-              ============================================================ */}
+              {/* MAINTENANCE CATEGORY */}
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
                   📋 Maintenance Category *
@@ -1108,8 +1078,8 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 )}
               </div>
               
-              {/* Hour-based fields */}
-              {showServiceForm.maintenance_type === 'hour' && (
+              {/* HOUR-BASED FIELDS - ONLY FOR PREVENTIVE */}
+              {showServiceForm.maintenance_type === 'hour' && serviceData.maintenance_category === 'preventive' && (
                 <>
                   <div style={{ marginBottom: '20px' }}>
                     <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>⏱️ Current Hours (Meter Reading)</label>
@@ -1147,8 +1117,8 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </>
               )}
               
-              {/* Month-based fields */}
-              {showServiceForm.maintenance_type === 'month' && (
+              {/* MONTH-BASED FIELDS - ONLY FOR PREVENTIVE */}
+              {showServiceForm.maintenance_type === 'month' && serviceData.maintenance_category === 'preventive' && (
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Service Interval (months) *</label>
                   <input 
@@ -1176,8 +1146,8 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </div>
               )}
               
-              {/* Year-based fields */}
-              {showServiceForm.maintenance_type === 'year' && (
+              {/* YEAR-BASED FIELDS - ONLY FOR PREVENTIVE */}
+              {showServiceForm.maintenance_type === 'year' && serviceData.maintenance_category === 'preventive' && (
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📆 Service Interval (years)</label>
                   <input 
@@ -1190,8 +1160,8 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </div>
               )}
               
-              {/* Month-based Preview */}
-              {showServiceForm.maintenance_type === 'month' && (
+              {/* MONTH-BASED PREVIEW - ONLY FOR PREVENTIVE */}
+              {showServiceForm.maintenance_type === 'month' && serviceData.maintenance_category === 'preventive' && (
                 <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#e8f4fd', borderRadius: '8px', border: '2px solid #2196f3' }}>
                   <strong style={{ fontSize: '14px' }}>📋 Calculation Preview:</strong><br />
                   <span style={{ fontSize: '13px' }}>
@@ -1202,9 +1172,30 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </div>
               )}
 
-              {/* ============================================================
-                  SERVICE CHECKLIST - Checkbox list with custom option
-              ============================================================ */}
+              {/* CORRECTIVE INFO - SHOW WHEN CORRECTIVE IS SELECTED */}
+              {serviceData.maintenance_category === 'corrective' && (
+                <div style={{ 
+                  marginBottom: '20px', 
+                  padding: '15px', 
+                  backgroundColor: '#fff3e0', 
+                  borderRadius: '8px', 
+                  border: '2px solid #ff9800'
+                }}>
+                  <strong style={{ fontSize: '14px', color: '#e65100' }}>📌 Corrective Maintenance - Audit Only</strong>
+                  <p style={{ margin: '5px 0 0 0', fontSize: '13px', color: '#555' }}>
+                    This service is for <strong>audit purposes only</strong>. 
+                    The preventive maintenance schedule will <strong>NOT</strong> be affected.
+                    <br />
+                    <span style={{ color: '#e65100' }}>✓ Service date will be recorded for audit trail</span>
+                    <br />
+                    <span style={{ color: '#e65100' }}>✓ Next service date will remain unchanged</span>
+                    <br />
+                    <span style={{ color: '#e65100' }}>✓ No interval or calculation required</span>
+                  </p>
+                </div>
+              )}
+
+              {/* SERVICE CHECKLIST */}
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
                   🔧 Services Performed * (Select all that apply)
