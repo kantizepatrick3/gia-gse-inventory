@@ -5,8 +5,8 @@ const ServiceHistoryReport = ({ token }) => {
   const [serviceHistory, setServiceHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [startDate, setStartDate] = useState('2025-12-20');
-  const [endDate, setEndDate] = useState('2026-06-20');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [equipment, setEquipment] = useState('');
   const [technician, setTechnician] = useState('');
   const [category, setCategory] = useState('All Categories');
@@ -23,33 +23,23 @@ const ServiceHistoryReport = ({ token }) => {
       return;
     }
 
-    let attempts = 0;
-    const maxAttempts = 3;
-    
-    while (attempts < maxAttempts) {
-      try {
-        const response = await axios.get(
-          `${API_URL}/api/service-history/all?${params}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 35000
-          }
-        );
-        setServiceHistory(response.data);
-        setLoading(false);
-        return;
-      } catch (err) {
-        attempts++;
-        if (attempts === maxAttempts) {
-          setError(`Failed after ${maxAttempts} attempts: ${err.message}`);
-          setLoading(false);
-          return;
+    try {
+      const response = await axios.get(
+        `${API_URL}/api/service-history/all?${params}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 35000
         }
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
-      }
+      );
+      setServiceHistory(response.data);
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching service history:', err);
+      setError('Failed to load service history. Please try again.');
+      setLoading(false);
     }
   };
 
@@ -65,8 +55,8 @@ const ServiceHistoryReport = ({ token }) => {
   };
 
   const handleReset = () => {
-    setStartDate('2025-12-20');
-    setEndDate('2026-06-20');
+    setStartDate('');
+    setEndDate('');
     setEquipment('');
     setTechnician('');
     setCategory('All Categories');
@@ -111,7 +101,51 @@ const ServiceHistoryReport = ({ token }) => {
   const totalRecords = serviceHistory.length;
   const uniqueEquipment = new Set(serviceHistory.map(item => item.equipment_name)).size;
   const uniqueTechnicians = new Set(serviceHistory.map(item => item.technician)).size;
-  const totalServices = serviceHistory.filter(item => item.status === 'SERVICED').length;
+  
+  // Count Preventive vs Corrective
+  const preventiveCount = serviceHistory.filter(item => 
+    item.category && item.category.toLowerCase() === 'preventive'
+  ).length;
+  const correctiveCount = serviceHistory.filter(item => 
+    item.category && item.category.toLowerCase() === 'corrective'
+  ).length;
+  const unknownCount = totalRecords - preventiveCount - correctiveCount;
+
+  // Category badge component
+  const getCategoryBadge = (category) => {
+    if (!category) return null;
+    const cat = category.toLowerCase();
+    if (cat === 'preventive') {
+      return {
+        bg: '#e8f5e9',
+        color: '#2e7d32',
+        text: '🛡️ Preventive',
+        border: '#a5d6a7'
+      };
+    } else if (cat === 'corrective') {
+      return {
+        bg: '#fce4ec',
+        color: '#c62828',
+        text: '🔧 Corrective',
+        border: '#ef9a9a'
+      };
+    }
+    return {
+      bg: '#e9ecef',
+      color: '#6c757d',
+      text: category || 'Unknown',
+      border: '#ced4da'
+    };
+  };
+
+  const getStatusBadge = (status) => {
+    const s = status ? status.toLowerCase() : '';
+    if (s === 'overdue') return { color: '#721c24', bg: '#f8d7da', text: '🔴 OVERDUE' };
+    if (s === 'due_soon') return { color: '#856404', bg: '#fff3cd', text: '🟡 DUE SOON' };
+    if (s === 'serviced') return { color: '#155724', bg: '#d4edda', text: '✅ SERVICED' };
+    if (s === 'no_maintenance') return { color: '#6c757d', bg: '#e9ecef', text: '⚪ NO MAINTENANCE' };
+    return { color: '#6c757d', bg: '#e9ecef', text: status || 'UNKNOWN' };
+  };
 
   return (
     <div style={{ padding: '20px', maxWidth: '100%' }}>
@@ -177,7 +211,6 @@ const ServiceHistoryReport = ({ token }) => {
             <option>All Categories</option>
             <option>Preventive</option>
             <option>Corrective</option>
-            <option>Emergency</option>
           </select>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
@@ -230,20 +263,6 @@ const ServiceHistoryReport = ({ token }) => {
         >
           📥 Export CSV
         </button>
-        <button 
-          onClick={() => alert('PDF export coming soon!')} 
-          style={{ 
-            padding: '10px 20px', 
-            backgroundColor: '#dc3545', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
-          📄 Export PDF
-        </button>
       </div>
 
       {/* Loading and Error States */}
@@ -263,16 +282,16 @@ const ServiceHistoryReport = ({ token }) => {
             <p style={{ fontSize: '28px', fontWeight: 'bold', margin: '5px 0 0 0', color: '#1565c0' }}>{totalRecords}</p>
           </div>
           <div style={{ padding: '15px 25px', backgroundColor: '#e8f5e9', borderRadius: '8px', border: '1px solid #c8e6c9', flex: '1', minWidth: '150px' }}>
-            <h4 style={{ margin: 0, color: '#2e7d32' }}>🛠️ Unique Equipment</h4>
-            <p style={{ fontSize: '28px', fontWeight: 'bold', margin: '5px 0 0 0', color: '#2e7d32' }}>{uniqueEquipment}</p>
+            <h4 style={{ margin: 0, color: '#2e7d32' }}>🛡️ Preventive</h4>
+            <p style={{ fontSize: '28px', fontWeight: 'bold', margin: '5px 0 0 0', color: '#2e7d32' }}>{preventiveCount}</p>
+          </div>
+          <div style={{ padding: '15px 25px', backgroundColor: '#fce4ec', borderRadius: '8px', border: '1px solid #ef9a9a', flex: '1', minWidth: '150px' }}>
+            <h4 style={{ margin: 0, color: '#c62828' }}>🔧 Corrective</h4>
+            <p style={{ fontSize: '28px', fontWeight: 'bold', margin: '5px 0 0 0', color: '#c62828' }}>{correctiveCount}</p>
           </div>
           <div style={{ padding: '15px 25px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ffe0b2', flex: '1', minWidth: '150px' }}>
-            <h4 style={{ margin: 0, color: '#e65100' }}>👨‍🔧 Unique Technicians</h4>
+            <h4 style={{ margin: 0, color: '#e65100' }}>👨‍🔧 Technicians</h4>
             <p style={{ fontSize: '28px', fontWeight: 'bold', margin: '5px 0 0 0', color: '#e65100' }}>{uniqueTechnicians}</p>
-          </div>
-          <div style={{ padding: '15px 25px', backgroundColor: '#f3e5f5', borderRadius: '8px', border: '1px solid '#e1bee7', flex: '1', minWidth: '150px' }}>
-            <h4 style={{ margin: 0, color: '#6a1b9a' }}>✅ Total Services</h4>
-            <p style={{ fontSize: '28px', fontWeight: 'bold', margin: '5px 0 0 0', color: '#6a1b9a' }}>{totalServices}</p>
           </div>
         </div>
       )}
@@ -303,41 +322,57 @@ const ServiceHistoryReport = ({ token }) => {
               </tr>
             </thead>
             <tbody>
-              {serviceHistory.map((item, index) => (
-                <tr key={index} style={{ backgroundColor: index % 2 === 0 ? '#f9f9f9' : 'white' }}>
-                  <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>{index + 1}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold' }}>{item.equipment_name || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.equipment_type || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.maintenance_type || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.category || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.services_performed || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.current_hours || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.target_hours || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                    {item.service_date ? new Date(item.service_date).toLocaleDateString() : '-'}
-                  </td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.technician || '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                    <span style={{ 
-                      padding: '3px 10px', 
-                      borderRadius: '4px', 
-                      backgroundColor: item.status === 'SERVICED' ? '#d4edda' : 
-                                     item.status === 'DUE SOON' ? '#fff3cd' : 
-                                     item.status === 'OVERDUE' ? '#f8d7da' : '#e9ecef',
-                      color: item.status === 'SERVICED' ? '#155724' : 
-                             item.status === 'DUE SOON' ? '#856404' : 
-                             item.status === 'OVERDUE' ? '#721c24' : '#6c757d',
-                      fontWeight: 'bold',
-                      fontSize: '11px'
-                    }}>
-                      {item.status || '-'}
-                    </span>
-                  </td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                    {item.next_service_date ? new Date(item.next_service_date).toLocaleDateString() : '-'}
-                  </td>
-                </tr>
-              ))}
+              {serviceHistory.map((item, index) => {
+                const categoryBadge = getCategoryBadge(item.category);
+                const statusBadge = getStatusBadge(item.status);
+                return (
+                  <tr key={index} style={{ backgroundColor: index % 2 === 0 ? '#f9f9f9' : 'white' }}>
+                    <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>{index + 1}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold' }}>{item.equipment_name || '-'}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.equipment_type || '-'}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.maintenance_type || '-'}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                      {categoryBadge && (
+                        <span style={{ 
+                          padding: '3px 10px', 
+                          borderRadius: '12px', 
+                          backgroundColor: categoryBadge.bg,
+                          color: categoryBadge.color,
+                          border: `1px solid ${categoryBadge.border}`,
+                          fontWeight: 'bold',
+                          fontSize: '11px',
+                          display: 'inline-block'
+                        }}>
+                          {categoryBadge.text}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.services_performed || '-'}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.current_hours || '-'}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.target_hours || '-'}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                      {item.service_date ? new Date(item.service_date).toLocaleDateString() : '-'}
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.technician || '-'}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                      <span style={{ 
+                        padding: '3px 10px', 
+                        borderRadius: '4px', 
+                        backgroundColor: statusBadge.bg,
+                        color: statusBadge.color,
+                        fontWeight: 'bold',
+                        fontSize: '11px',
+                        display: 'inline-block'
+                      }}>
+                        {statusBadge.text}
+                      </span>
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                      {item.next_service_date ? new Date(item.next_service_date).toLocaleDateString() : '-'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
