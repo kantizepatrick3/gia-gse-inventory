@@ -75,7 +75,7 @@ const Login = ({ onLogin }) => {
   }, []);
 
   // CAS BACKEND URL
-  const API_URL = 'https://gse-backend.onrender.com';
+  const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   const handleSubmit = async (e) => {
     e.preventDefault();

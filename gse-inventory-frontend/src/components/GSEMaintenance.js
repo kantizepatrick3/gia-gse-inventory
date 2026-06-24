@@ -61,7 +61,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     last_service_year: null
   });
 
-  const API_URL = 'https://gse-backend.onrender.com';
+  const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   useEffect(() => {
     fetchEquipment();

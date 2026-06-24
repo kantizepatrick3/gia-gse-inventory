@@ -8,7 +8,7 @@ const PendingApprovals = ({ token, user }) => {
   const [loading, setLoading] = useState(false);
   const [comment, setComment] = useState({});
 
-  const API_URL = 'https://gse-backend.onrender.com';
+  const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   useEffect(() => {
     fetchPendingRequests();

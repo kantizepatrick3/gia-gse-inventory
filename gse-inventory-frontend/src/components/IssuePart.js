@@ -17,7 +17,7 @@ const IssuePart = ({ token, user }) => {
     maintenance_type: 'preventive' // NEW: preventive or corrective
   });
 
-  const API_URL = 'https://gse-backend.onrender.com';
+  const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   useEffect(() => {
     fetchParts();

@@ -12,7 +12,7 @@ const ChangePassword = ({ token, user, onLogout }) => {
   const [showDefaultPasswords, setShowDefaultPasswords] = useState(false);
 
   // Use Render backend URL
-  const API_URL = 'https://gse-backend.onrender.com';
+  const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   // Default passwords based on role
   const getDefaultPassword = () => {
