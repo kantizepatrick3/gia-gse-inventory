@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: gse-inventory-frontend
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://gse-inventory-backend.onrender.com
+
+  - type: web
+    name: gse-inventory-backend
+    env: node
+    buildCommand: cd gse-inventory && npm install
+    startCommand: cd gse-inventory && npm start
+    envVars:
+      - key: DATABASE_URL
+        value: libsql://gse-inventory-2-giagambia.aws-eu-west-1.turso.io
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
