@@ -237,7 +237,8 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     months_interval: '',
     service_interval_months: '',
     service_interval_years: 1,
-    // NEW: Checklist for services
+    // NEW: Maintenance category
+    maintenance_category: 'preventive', // 'preventive' or 'corrective'
     selectedServices: [],
     customService: '',
     customServices: []
@@ -479,7 +480,9 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         service_date: serviceData.service_date,
         current_hours: serviceData.current_hours,
         target_hours: serviceData.target_hours,
-        months_interval: serviceData.months_interval
+        months_interval: serviceData.months_interval,
+        // NEW: Send maintenance category
+        maintenance_category: serviceData.maintenance_category || 'preventive'
       };
       
       const response = await axios.post(`${API_URL}/api/gse-maintenance/${equipId}/service`, payload, {
@@ -498,6 +501,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         months_interval: '',
         service_interval_months: '',
         service_interval_years: 1,
+        maintenance_category: 'preventive',
         selectedServices: [],
         customService: '',
         customServices: []
@@ -819,6 +823,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                         target_hours: eq.target_hours || eq.service_interval_hours || 0, 
                         months_interval: '', 
                         service_interval_months: '',
+                        maintenance_category: 'preventive',
                         selectedServices: [],
                         customService: '',
                         customServices: []
@@ -992,13 +997,16 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         </div>
       )}
 
-      {/* Record Service Modal - UPDATED WITH CHECKLIST */}
+      {/* ============================================================
+          RECORD SERVICE MODAL - WITH PREVENTIVE/CORRECTIVE SELECTION
+      ============================================================ */}
       {showServiceForm && showServiceForm.maintenance_type !== 'none' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '750px', maxWidth: '95%', maxHeight: '90vh', overflowY: 'auto' }}>
             <h3>🔧 Record Service for: {showServiceForm.equipment_name}</h3>
             <p>Maintenance Type: <strong>{getMaintenanceTypeIcon(showServiceForm)}</strong></p>
             <form onSubmit={(e) => handleRecordService(e, showServiceForm.id)}>
+              
               {/* Service Date */}
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Service Date *</label>
@@ -1010,6 +1018,94 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
                 />
                 <small style={{ color: '#666' }}>Date when service was performed</small>
+              </div>
+
+              {/* ============================================================
+                  MAINTENANCE CATEGORY - Preventive or Corrective
+              ============================================================ */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                  📋 Maintenance Category *
+                </label>
+                <div style={{ 
+                  display: 'flex', 
+                  gap: '15px',
+                  padding: '10px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '6px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    padding: '8px 16px',
+                    borderRadius: '4px',
+                    backgroundColor: serviceData.maintenance_category === 'preventive' ? '#e3f2fd' : 'transparent',
+                    border: serviceData.maintenance_category === 'preventive' ? '2px solid #1976d2' : '2px solid transparent',
+                    flex: 1,
+                    justifyContent: 'center'
+                  }}>
+                    <input
+                      type="radio"
+                      name="maintenance_category"
+                      value="preventive"
+                      checked={serviceData.maintenance_category === 'preventive'}
+                      onChange={() => setServiceData(prev => ({ ...prev, maintenance_category: 'preventive' }))}
+                    />
+                    <span>🛡️ Preventive</span>
+                    <span style={{ fontSize: '11px', color: '#666' }}>(Scheduled)</span>
+                  </label>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    padding: '8px 16px',
+                    borderRadius: '4px',
+                    backgroundColor: serviceData.maintenance_category === 'corrective' ? '#fce4ec' : 'transparent',
+                    border: serviceData.maintenance_category === 'corrective' ? '2px solid #c62828' : '2px solid transparent',
+                    flex: 1,
+                    justifyContent: 'center'
+                  }}>
+                    <input
+                      type="radio"
+                      name="maintenance_category"
+                      value="corrective"
+                      checked={serviceData.maintenance_category === 'corrective'}
+                      onChange={() => setServiceData(prev => ({ ...prev, maintenance_category: 'corrective' }))}
+                    />
+                    <span>🔧 Corrective</span>
+                    <span style={{ fontSize: '11px', color: '#666' }}>(Unscheduled)</span>
+                  </label>
+                </div>
+                {serviceData.maintenance_category === 'corrective' && (
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '8px 12px', 
+                    backgroundColor: '#fff3e0', 
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    color: '#e65100',
+                    border: '1px solid #ffe0b2'
+                  }}>
+                    ⚠️ <strong>Note:</strong> Corrective maintenance will NOT change the scheduled preventive maintenance dates.
+                  </div>
+                )}
+                {serviceData.maintenance_category === 'preventive' && (
+                  <div style={{ 
+                    marginTop: '8px', 
+                    padding: '8px 12px', 
+                    backgroundColor: '#e8f5e9', 
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    color: '#2e7d32',
+                    border: '1px solid #c8e6c9'
+                  }}>
+                    ✅ <strong>Note:</strong> Preventive maintenance will update the next scheduled service date.
+                  </div>
+                )}
               </div>
               
               {/* Hour-based fields */}
@@ -1123,30 +1219,14 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   borderRadius: '6px',
                   border: '1px solid #e9ecef'
                 }}>
-                  {/* Pre-defined service checklist */}
                   {[
-                    'Inspection',
-                    'Testing',
-                    'Cleaning',
-                    'Calibration',
-                    'Replacement',
-                    'Repair',
-                    'Maintenance',
-                    'Check Pressure',
-                    'Check Date',
-                    'Visual Inspection',
-                    'Functional Test',
-                    'Safety Check',
-                    'Oil Change',
-                    'Filter Replacement',
-                    'Brake Inspection',
-                    'Tire Check',
-                    'Battery Test',
-                    'Hydraulic Fluid Check',
-                    'Electrical System Check',
-                    'Cooling System Check',
-                    'Lubrication',
-                    'Parts Replacement'
+                    'Inspection', 'Testing', 'Cleaning', 'Calibration', 'Replacement',
+                    'Repair', 'Maintenance', 'Check Pressure', 'Check Date',
+                    'Visual Inspection', 'Functional Test', 'Safety Check',
+                    'Oil Change', 'Filter Replacement', 'Brake Inspection',
+                    'Tire Check', 'Battery Test', 'Hydraulic Fluid Check',
+                    'Electrical System Check', 'Cooling System Check',
+                    'Lubrication', 'Parts Replacement'
                   ].map(service => (
                     <label key={service} style={{
                       display: 'flex',
@@ -1171,7 +1251,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                             } else {
                               updatedServices = updatedServices.filter(s => s !== service);
                             }
-                            // Update service_performed as comma-separated string
                             const allServices = [...updatedServices];
                             if (prev.customServices && prev.customServices.length > 0) {
                               allServices.push(...prev.customServices);
@@ -1190,27 +1269,13 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </div>
 
                 {/* Custom Service Input */}
-                <div style={{ 
-                  marginTop: '12px',
-                  display: 'flex',
-                  gap: '10px',
-                  alignItems: 'center'
-                }}>
+                <div style={{ marginTop: '12px', display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <input
                     type="text"
                     value={serviceData.customService || ''}
-                    onChange={(e) => setServiceData(prev => ({
-                      ...prev,
-                      customService: e.target.value
-                    }))}
+                    onChange={(e) => setServiceData(prev => ({ ...prev, customService: e.target.value }))}
                     placeholder="Enter custom service not listed above..."
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #ddd',
-                      fontSize: '13px'
-                    }}
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '13px' }}
                   />
                   <button
                     type="button"
@@ -1229,22 +1294,13 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                         });
                       }
                     }}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: '#28a745',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      whiteSpace: 'nowrap'
-                    }}
+                    style={{ padding: '8px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}
                   >
                     + Add Custom
                   </button>
                 </div>
 
-                {/* Display custom services added */}
+                {/* Display custom services */}
                 {serviceData.customServices && serviceData.customServices.length > 0 && (
                   <div style={{ marginTop: '10px' }}>
                     <small style={{ color: '#666' }}>Custom services added:</small>
@@ -1274,15 +1330,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                                 };
                               });
                             }}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: '#c62828',
-                              cursor: 'pointer',
-                              marginLeft: '5px',
-                              fontSize: '14px',
-                              fontWeight: 'bold'
-                            }}
+                            style={{ background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', marginLeft: '5px', fontSize: '14px', fontWeight: 'bold' }}
                           >
                             ×
                           </button>
@@ -1292,16 +1340,9 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   </div>
                 )}
 
-                {/* Summary of selected services */}
+                {/* Summary */}
                 {serviceData.service_performed && (
-                  <div style={{ 
-                    marginTop: '10px',
-                    padding: '10px',
-                    backgroundColor: '#e3f2fd',
-                    borderRadius: '4px',
-                    fontSize: '13px',
-                    border: '1px solid #bbdefb'
-                  }}>
+                  <div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#e3f2fd', borderRadius: '4px', fontSize: '13px', border: '1px solid #bbdefb' }}>
                     <strong>✅ Selected Services:</strong> {serviceData.service_performed}
                   </div>
                 )}
@@ -1365,6 +1406,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                       months_interval: '', 
                       service_interval_months: '', 
                       service_interval_years: 1,
+                      maintenance_category: 'preventive',
                       selectedServices: [],
                       customService: '',
                       customServices: []
