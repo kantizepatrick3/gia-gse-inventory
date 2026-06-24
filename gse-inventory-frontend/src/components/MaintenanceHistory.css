@@ -1,3 +1,6 @@
+/* ============================================================
+   MAINTENANCE HISTORY CONTAINER
+   ============================================================ */
 .maintenance-history-container {
   padding: 20px;
   max-width: 1400px;
@@ -11,6 +14,9 @@
   padding-bottom: 10px;
 }
 
+/* ============================================================
+   FILTERS SECTION
+   ============================================================ */
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -42,6 +48,9 @@
   font-size: 14px;
 }
 
+/* ============================================================
+   EXPORT BUTTON
+   ============================================================ */
 .export-btn {
   padding: 8px 16px;
   background: #27ae60;
@@ -63,6 +72,9 @@
   cursor: not-allowed;
 }
 
+/* ============================================================
+   LOADING STATE
+   ============================================================ */
 .loading {
   text-align: center;
   padding: 40px;
@@ -70,6 +82,9 @@
   font-size: 16px;
 }
 
+/* ============================================================
+   EQUIPMENT LIST TABLE
+   ============================================================ */
 .equipment-list {
   overflow-x: auto;
   margin-bottom: 30px;
@@ -115,6 +130,9 @@
   background: #2980b9;
 }
 
+/* ============================================================
+   HISTORY DETAIL SECTION
+   ============================================================ */
 .history-detail {
   margin-top: 30px;
   padding: 20px;
@@ -149,6 +167,9 @@
   margin-bottom: 15px;
 }
 
+/* ============================================================
+   HISTORY TABLE
+   ============================================================ */
 .history-table {
   width: 100%;
   border-collapse: collapse;
@@ -176,12 +197,82 @@
   background: #e8f4fd;
 }
 
+/* ============================================================
+   NO HISTORY STATE
+   ============================================================ */
 .no-history {
   text-align: center;
   color: #7f8c8d;
   padding: 30px;
 }
 
+/* ============================================================
+   CATEGORY BADGE STYLES
+   ============================================================ */
+.category-badge {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 11px;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* Preventive - Green */
+.category-badge-preventive {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+
+/* Corrective - Red */
+.category-badge-corrective {
+  background-color: #fce4ec;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+/* Unknown - Gray */
+.category-badge-unknown {
+  background-color: #e9ecef;
+  color: #6c757d;
+  border: 1px solid #ced4da;
+}
+
+/* ============================================================
+   STATUS BADGE STYLES (Optional - for consistency)
+   ============================================================ */
+.status-badge {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 11px;
+  display: inline-block;
+}
+
+.status-badge-overdue {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.status-badge-due_soon {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.status-badge-serviced {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-badge-no_maintenance {
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
+/* ============================================================
+   RESPONSIVE DESIGN
+   ============================================================ */
 @media (max-width: 768px) {
   .filters {
     flex-direction: column;
@@ -199,5 +290,34 @@
   .history-table th,
   .history-table td {
     padding: 6px;
+  }
+
+  .filter-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-group label {
+    margin-bottom: 2px;
+  }
+}
+
+@media (max-width: 480px) {
+  .maintenance-history-container {
+    padding: 10px;
+  }
+
+  .history-table {
+    font-size: 10px;
+  }
+
+  .history-table th,
+  .history-table td {
+    padding: 4px 6px;
+  }
+
+  .category-badge {
+    font-size: 9px;
+    padding: 2px 6px;
   }
 }
