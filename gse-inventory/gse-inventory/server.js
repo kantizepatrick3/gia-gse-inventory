@@ -86,10 +86,38 @@ const authenticateToken = (req, res, next) => {
 };
 
 // ============================================================
+// UTILITY FUNCTIONS FOR MAINTENANCE CALCULATIONS
+// ============================================================
+const calculateNextServiceDate = (lastServiceDate, intervalMonths) => {
+  if (!lastServiceDate || !intervalMonths || parseInt(intervalMonths) <= 0) return null;
+  const date = new Date(lastServiceDate);
+  date.setMonth(date.getMonth() + parseInt(intervalMonths));
+  return date.toISOString().split('T')[0];
+};
+
+const calculateNextServiceDateYears = (lastServiceDate, intervalYears) => {
+  if (!lastServiceDate || !intervalYears || parseInt(intervalYears) <= 0) return null;
+  const date = new Date(lastServiceDate);
+  date.setFullYear(date.getFullYear() + parseInt(intervalYears));
+  return date.toISOString().split('T')[0];
+};
+
+const calculateDaysUntil = (dateString) => {
+  if (!dateString) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const targetDate = new Date(dateString);
+  targetDate.setHours(0, 0, 0, 0);
+  const diffTime = targetDate - today;
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
+// ============================================================
 // DATABASE INITIALIZATION
 // ============================================================
 const createTables = async () => {
   try {
+    // Users table
     await db.execute(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
@@ -100,6 +128,7 @@ const createTables = async () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Parts table
     await db.execute(`CREATE TABLE IF NOT EXISTS parts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       part_number TEXT UNIQUE NOT NULL,
@@ -125,6 +154,7 @@ const createTables = async () => {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Transactions table
     await db.execute(`CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       part_id INTEGER,
@@ -141,6 +171,7 @@ const createTables = async () => {
       FOREIGN KEY (part_id) REFERENCES parts(id)
     )`);
 
+    // Pending Issues table
     await db.execute(`CREATE TABLE IF NOT EXISTS pending_issues (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       part_number TEXT NOT NULL,
@@ -160,6 +191,7 @@ const createTables = async () => {
       FOREIGN KEY (part_id) REFERENCES parts(id)
     )`);
 
+    // GSE Maintenance table
     await db.execute(`CREATE TABLE IF NOT EXISTS gse_maintenance (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       equipment_name TEXT NOT NULL,
@@ -195,19 +227,7 @@ const createTables = async () => {
       FOREIGN KEY (part_id) REFERENCES parts(id)
     )`);
 
-    await db.execute(`CREATE TABLE IF NOT EXISTS price_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      part_id INTEGER NOT NULL,
-      price REAL NOT NULL,
-      quantity INTEGER DEFAULT 1,
-      transaction_type TEXT NOT NULL,
-      reference_number TEXT,
-      notes TEXT,
-      recorded_by TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (part_id) REFERENCES parts(id)
-    )`);
-
+    // Service History table
     await db.execute(`CREATE TABLE IF NOT EXISTS service_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       maintenance_id INTEGER NOT NULL,
@@ -220,6 +240,7 @@ const createTables = async () => {
       notes TEXT,
       maintenance_category TEXT,
       checklist_items TEXT,
+      checklist_completed TEXT,
       current_hours INTEGER DEFAULT 0,
       target_hours INTEGER DEFAULT 0,
       service_interval_months INTEGER DEFAULT 0,
@@ -229,15 +250,7 @@ const createTables = async () => {
       FOREIGN KEY (maintenance_id) REFERENCES gse_maintenance(id)
     )`);
 
-    await db.execute(`CREATE TABLE IF NOT EXISTS maintenance_checklist (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      maintenance_id INTEGER NOT NULL,
-      checklist_item TEXT NOT NULL,
-      is_checked INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (maintenance_id) REFERENCES gse_maintenance(id)
-    )`);
-
+    // Maintenance Attachments table
     await db.execute(`CREATE TABLE IF NOT EXISTS maintenance_attachments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       maintenance_id INTEGER NOT NULL,
@@ -249,6 +262,20 @@ const createTables = async () => {
       uploaded_by TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (maintenance_id) REFERENCES gse_maintenance(id)
+    )`);
+
+    // Price History table
+    await db.execute(`CREATE TABLE IF NOT EXISTS price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      part_id INTEGER NOT NULL,
+      price REAL NOT NULL,
+      quantity INTEGER DEFAULT 1,
+      transaction_type TEXT NOT NULL,
+      reference_number TEXT,
+      notes TEXT,
+      recorded_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (part_id) REFERENCES parts(id)
     )`);
 
     console.log('✅ All tables created successfully');
@@ -267,8 +294,6 @@ const ensureAllColumns = async () => {
     const tableInfo = await db.execute("PRAGMA table_info(parts)");
     const columns = tableInfo.rows.map(r => r.name);
     
-    console.log('📋 Current columns:', columns.join(', '));
-    
     const requiredColumns = [
       { name: 'unit_price', type: 'REAL DEFAULT 0' },
       { name: 'current_price', type: 'REAL DEFAULT 0' },
@@ -286,30 +311,15 @@ const ensureAllColumns = async () => {
       { name: 'updated_at', type: 'DATETIME' }
     ];
     
-    let added = 0;
     for (const col of requiredColumns) {
       if (!columns.includes(col.name)) {
         try {
           await db.execute(`ALTER TABLE parts ADD COLUMN ${col.name} ${col.type}`);
           console.log(`✅ Added column: ${col.name}`);
-          added++;
         } catch (e) {
           console.log(`⚠️ Could not add ${col.name}: ${e.message}`);
         }
       }
-    }
-    
-    if (added > 0) {
-      console.log(`✅ Added ${added} new columns`);
-    } else {
-      console.log('✅ All columns already exist');
-    }
-    
-    try {
-      await db.execute(`UPDATE parts SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL`);
-      await db.execute(`UPDATE parts SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-    } catch (e) {
-      console.log('⚠️ Could not update timestamps:', e.message);
     }
     
     console.log('✅ Column check complete');
@@ -382,7 +392,6 @@ const createSampleData = async () => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         args: part
       });
-
       console.log(`✅ Added ${part[0]} - ${part[1]}`);
     }
 
@@ -393,7 +402,7 @@ const createSampleData = async () => {
 };
 
 // ============================================================
-// LOGIN
+// LOGIN ROUTE
 // ============================================================
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
@@ -430,7 +439,701 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ============================================================
-// PARTS CRUD ROUTES
+// GSE MAINTENANCE ROUTES - COMPLETE
+// ============================================================
+
+// GET ALL MAINTENANCE
+app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute(`
+      SELECT 
+        gm.*,
+        p.part_number,
+        p.description as part_description
+      FROM gse_maintenance gm
+      LEFT JOIN parts p ON gm.part_id = p.id
+      ORDER BY gm.equipment_name
+    `);
+    
+    // Enhance each record with calculated fields matching frontend expectations
+    const enhanced = result.rows.map(item => {
+      let daysRemaining = null;
+      let hoursRemaining = null;
+      let status = 'serviced';
+      let daysOverdue = 0;
+      let alertReason = null;
+
+      // Calculate days remaining if next_service_date exists
+      if (item.next_service_date) {
+        daysRemaining = calculateDaysUntil(item.next_service_date);
+      }
+
+      // Calculate hours remaining for hour-based maintenance
+      if (item.maintenance_type === 'hour' && item.target_hours && item.current_hours !== undefined) {
+        hoursRemaining = parseInt(item.target_hours) - (parseInt(item.current_hours) || 0);
+      }
+
+      // Determine status based on conditions
+      if (item.maintenance_type === 'none') {
+        status = 'no_maintenance';
+      } else if (item.maintenance_type === 'hour') {
+        // Check both conditions
+        if (daysRemaining !== null && daysRemaining < 0) {
+          status = 'overdue';
+          daysOverdue = Math.abs(daysRemaining);
+          alertReason = `Date overdue by ${Math.abs(daysRemaining)} days`;
+        } else if (hoursRemaining !== null && hoursRemaining < 0) {
+          status = 'overdue';
+          daysOverdue = Math.abs(hoursRemaining);
+          alertReason = `Hours overdue by ${Math.abs(hoursRemaining)} hrs`;
+        } else if (daysRemaining !== null && daysRemaining <= 4) {
+          status = 'due_soon';
+          alertReason = `Date due in ${daysRemaining} days`;
+        } else if (hoursRemaining !== null && hoursRemaining <= 40) {
+          status = 'due_soon';
+          alertReason = `Hours due in ${hoursRemaining} hrs`;
+        } else {
+          status = 'serviced';
+        }
+      } else if (item.maintenance_type === 'month') {
+        if (daysRemaining !== null) {
+          if (daysRemaining < 0) {
+            status = 'overdue';
+            daysOverdue = Math.abs(daysRemaining);
+          } else if (daysRemaining <= 7) {
+            status = 'due_soon';
+          } else {
+            status = 'serviced';
+          }
+        }
+      } else if (item.maintenance_type === 'year') {
+        if (item.next_service_year) {
+          const currentYear = new Date().getFullYear();
+          const yearsRemaining = parseInt(item.next_service_year) - currentYear;
+          if (yearsRemaining < 0) {
+            status = 'overdue';
+            daysOverdue = Math.abs(yearsRemaining) * 365;
+          } else if (yearsRemaining === 0) {
+            status = 'due_soon';
+          } else {
+            status = 'serviced';
+          }
+        }
+      }
+
+      // Build display values for frontend
+      let currentServiceDisplay = 'Not recorded';
+      if (item.maintenance_type === 'hour') {
+        if (item.last_service_date && item.last_service_hours !== undefined) {
+          currentServiceDisplay = `${new Date(item.last_service_date).toLocaleDateString()} @ ${item.last_service_hours} hrs`;
+        } else if (item.last_service_date) {
+          currentServiceDisplay = new Date(item.last_service_date).toLocaleDateString();
+        }
+      } else if (item.maintenance_type === 'month') {
+        currentServiceDisplay = item.last_service_date ? new Date(item.last_service_date).toLocaleDateString() : 'Not recorded';
+      } else if (item.maintenance_type === 'year') {
+        currentServiceDisplay = item.last_service_year ? `${item.last_service_year}` : 'Not recorded';
+      }
+
+      // Return enhanced object matching frontend expectations
+      return {
+        ...item,
+        days_remaining: daysRemaining,
+        hours_remaining: hoursRemaining,
+        remaining_hours: hoursRemaining,
+        daysOverdue: daysOverdue,
+        alert_reason: alertReason,
+        current_service_display: currentServiceDisplay,
+        next_service_column: item.next_service_date ? new Date(item.next_service_date).toLocaleDateString() : 'Not scheduled',
+        // Important: Keep next_service_date as ISO string for frontend formatDate function
+        next_service_date: item.next_service_date,
+        status: status,
+        // For month-based display
+        days_remaining_display: daysRemaining !== null ? daysRemaining : 'N/A'
+      };
+    });
+
+    console.log(`✅ Returning ${enhanced.length} maintenance records`);
+    res.json({ success: true, equipment: enhanced });
+  } catch (err) {
+    console.error('Error fetching maintenance:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET MAINTENANCE BY ID
+app.get('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [req.params.id]
+    });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipment not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching maintenance:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CREATE MAINTENANCE RECORD
+app.post('/api/gse-maintenance', authenticateToken, async (req, res) => {
+  const {
+    equipment_name,
+    equipment_type,
+    maintenance_type,
+    service_performed,
+    technician_name,
+    notes,
+    last_service_date,
+    last_service_hours,
+    last_service_year,
+    last_service_full_date,
+    service_interval_hours,
+    service_interval_months,
+    service_interval_years,
+    service_interval_months_for_hour,
+    current_hours,
+    target_hours
+  } = req.body;
+
+  try {
+    let nextServiceDate = null;
+    let nextServiceYear = null;
+    let status = 'serviced';
+
+    // Calculate next service based on maintenance type
+    if (maintenance_type === 'hour') {
+      if (service_interval_months_for_hour && service_interval_months_for_hour > 0 && last_service_date) {
+        nextServiceDate = calculateNextServiceDate(last_service_date, service_interval_months_for_hour);
+      }
+      if (service_interval_hours) {
+        // target_hours is the same as service_interval_hours for hour-based
+      }
+    } else if (maintenance_type === 'month') {
+      if (last_service_date && service_interval_months && service_interval_months > 0) {
+        nextServiceDate = calculateNextServiceDate(last_service_date, service_interval_months);
+      }
+    } else if (maintenance_type === 'year') {
+      if (last_service_year && service_interval_years) {
+        nextServiceYear = parseInt(last_service_year) + parseInt(service_interval_years);
+      }
+      if (last_service_full_date && service_interval_years) {
+        nextServiceDate = calculateNextServiceDateYears(last_service_full_date, service_interval_years);
+      }
+    } else if (maintenance_type === 'none') {
+      status = 'no_maintenance';
+    }
+
+    const result = await db.execute({
+      sql: `
+        INSERT INTO gse_maintenance (
+          equipment_name,
+          equipment_type,
+          maintenance_type,
+          service_performed,
+          technician_name,
+          notes,
+          last_service_date,
+          last_service_hours,
+          last_service_year,
+          last_service_full_date,
+          service_interval_hours,
+          service_interval_months,
+          service_interval_years,
+          service_interval_months_for_hour,
+          current_hours,
+          target_hours,
+          next_service_date,
+          next_service_year,
+          status,
+          created_by,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING *
+      `,
+      args: [
+        equipment_name,
+        equipment_type || 'General',
+        maintenance_type || 'none',
+        service_performed || '',
+        technician_name || '',
+        notes || '',
+        last_service_date || null,
+        last_service_hours || 0,
+        last_service_year || null,
+        last_service_full_date || null,
+        service_interval_hours || 0,
+        service_interval_months || 0,
+        service_interval_years || 0,
+        service_interval_months_for_hour || 0,
+        current_hours || 0,
+        target_hours || 0,
+        nextServiceDate,
+        nextServiceYear,
+        status,
+        req.user.username
+      ]
+    });
+
+    res.json({
+      success: true,
+      message: 'Equipment added to maintenance schedule',
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error creating maintenance:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// UPDATE MAINTENANCE RECORD
+app.put('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const {
+    equipment_name,
+    equipment_type,
+    maintenance_type,
+    service_interval_hours,
+    service_interval_months,
+    service_interval_years,
+    service_interval_months_for_hour,
+    last_service_date,
+    last_service_hours,
+    last_service_year,
+    last_service_full_date,
+    target_hours,
+    next_service_date
+  } = req.body;
+
+  try {
+    let newNextServiceDate = next_service_date || null;
+    let newNextServiceYear = null;
+
+    if (maintenance_type === 'hour') {
+      if (service_interval_months_for_hour && service_interval_months_for_hour > 0 && last_service_date) {
+        newNextServiceDate = calculateNextServiceDate(last_service_date, service_interval_months_for_hour);
+      }
+    } else if (maintenance_type === 'month') {
+      if (last_service_date && service_interval_months && service_interval_months > 0) {
+        newNextServiceDate = calculateNextServiceDate(last_service_date, service_interval_months);
+      }
+    } else if (maintenance_type === 'year') {
+      if (last_service_year && service_interval_years) {
+        newNextServiceYear = parseInt(last_service_year) + parseInt(service_interval_years);
+      }
+      if (last_service_full_date && service_interval_years) {
+        newNextServiceDate = calculateNextServiceDateYears(last_service_full_date, service_interval_years);
+      }
+    }
+
+    await db.execute({
+      sql: `
+        UPDATE gse_maintenance SET
+          equipment_name = ?,
+          equipment_type = ?,
+          maintenance_type = ?,
+          service_interval_hours = ?,
+          service_interval_months = ?,
+          service_interval_years = ?,
+          service_interval_months_for_hour = ?,
+          last_service_date = ?,
+          last_service_hours = ?,
+          last_service_year = ?,
+          last_service_full_date = ?,
+          target_hours = ?,
+          next_service_date = ?,
+          next_service_year = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [
+        equipment_name,
+        equipment_type,
+        maintenance_type,
+        service_interval_hours || 0,
+        service_interval_months || 0,
+        service_interval_years || 0,
+        service_interval_months_for_hour || 0,
+        last_service_date || null,
+        last_service_hours || 0,
+        last_service_year || null,
+        last_service_full_date || null,
+        target_hours || 0,
+        newNextServiceDate,
+        newNextServiceYear,
+        id
+      ]
+    });
+
+    res.json({
+      success: true,
+      message: 'Equipment updated successfully'
+    });
+  } catch (err) {
+    console.error('Error updating maintenance:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// UPDATE CURRENT HOURS
+app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { current_hours } = req.body;
+
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipment not found' });
+    }
+
+    const equipment = result.rows[0];
+    const hoursRemaining = (equipment.target_hours || equipment.service_interval_hours || 0) - parseInt(current_hours);
+
+    await db.execute({
+      sql: `
+        UPDATE gse_maintenance SET
+          current_hours = ?,
+          hours_remaining = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [current_hours, hoursRemaining, id]
+    });
+
+    res.json({
+      success: true,
+      message: 'Hours updated successfully',
+      data: { current_hours, hours_remaining: hoursRemaining }
+    });
+  } catch (err) {
+    console.error('Error updating hours:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// RECORD SERVICE
+app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const {
+    service_performed,
+    technician_name,
+    notes,
+    service_date,
+    current_hours,
+    target_hours,
+    months_interval
+  } = req.body;
+
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipment not found' });
+    }
+
+    const equipment = result.rows[0];
+    let nextServiceDate = null;
+    let nextServiceYear = null;
+    let status = 'serviced';
+
+    // Calculate next service based on maintenance type
+    if (equipment.maintenance_type === 'hour') {
+      const intervalMonths = months_interval || equipment.service_interval_months_for_hour || 0;
+      if (intervalMonths > 0 && service_date) {
+        nextServiceDate = calculateNextServiceDate(service_date, intervalMonths);
+      }
+      const newTargetHours = target_hours || equipment.target_hours || equipment.service_interval_hours || 0;
+      const newCurrentHours = current_hours || equipment.current_hours || 0;
+      
+      await db.execute({
+        sql: `
+          UPDATE gse_maintenance SET
+            last_service_date = ?,
+            last_service_hours = ?,
+            current_hours = ?,
+            target_hours = ?,
+            service_performed = ?,
+            technician_name = ?,
+            notes = ?,
+            next_service_date = ?,
+            service_interval_months_for_hour = ?,
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        args: [
+          service_date,
+          current_hours || 0,
+          newCurrentHours,
+          newTargetHours,
+          service_performed || '',
+          technician_name || '',
+          notes || '',
+          nextServiceDate,
+          parseInt(intervalMonths) || 0,
+          status,
+          id
+        ]
+      });
+    } else if (equipment.maintenance_type === 'month') {
+      const intervalMonths = months_interval || equipment.service_interval_months || 0;
+      if (service_date && intervalMonths > 0) {
+        nextServiceDate = calculateNextServiceDate(service_date, intervalMonths);
+      }
+      
+      await db.execute({
+        sql: `
+          UPDATE gse_maintenance SET
+            last_service_date = ?,
+            service_performed = ?,
+            technician_name = ?,
+            notes = ?,
+            next_service_date = ?,
+            service_interval_months = ?,
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        args: [
+          service_date,
+          service_performed || '',
+          technician_name || '',
+          notes || '',
+          nextServiceDate,
+          parseInt(intervalMonths) || 0,
+          status,
+          id
+        ]
+      });
+    } else if (equipment.maintenance_type === 'year') {
+      const currentYear = new Date(service_date).getFullYear();
+      const intervalYears = equipment.service_interval_years || 1;
+      nextServiceYear = currentYear + parseInt(intervalYears);
+      
+      await db.execute({
+        sql: `
+          UPDATE gse_maintenance SET
+            last_service_full_date = ?,
+            last_service_year = ?,
+            service_performed = ?,
+            technician_name = ?,
+            notes = ?,
+            next_service_year = ?,
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        args: [
+          service_date,
+          currentYear,
+          service_performed || '',
+          technician_name || '',
+          notes || '',
+          nextServiceYear,
+          status,
+          id
+        ]
+      });
+    }
+
+    // Record in service history
+    await db.execute({
+      sql: `
+        INSERT INTO service_history (
+          maintenance_id,
+          equipment_name,
+          equipment_type,
+          maintenance_type,
+          service_date,
+          service_performed,
+          technician_name,
+          notes,
+          maintenance_category,
+          current_hours,
+          target_hours,
+          service_interval_months,
+          service_interval_years,
+          recorded_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        id,
+        equipment.equipment_name,
+        equipment.equipment_type,
+        equipment.maintenance_type,
+        service_date,
+        service_performed || '',
+        technician_name || '',
+        notes || '',
+        equipment.maintenance_category || 'preventive',
+        current_hours || 0,
+        target_hours || 0,
+        parseInt(months_interval) || 0,
+        equipment.service_interval_years || 0,
+        req.user.username
+      ]
+    });
+
+    res.json({
+      success: true,
+      message: '✅ Service recorded successfully!'
+    });
+  } catch (err) {
+    console.error('Error recording service:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE MAINTENANCE RECORD
+app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.execute({
+      sql: 'SELECT equipment_name FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipment not found' });
+    }
+
+    // Delete associated records first
+    await db.execute({
+      sql: 'DELETE FROM service_history WHERE maintenance_id = ?',
+      args: [id]
+    });
+    await db.execute({
+      sql: 'DELETE FROM maintenance_attachments WHERE maintenance_id = ?',
+      args: [id]
+    });
+    await db.execute({
+      sql: 'DELETE FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    res.json({
+      success: true,
+      message: 'Equipment deleted successfully'
+    });
+  } catch (err) {
+    console.error('Error deleting equipment:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// MAINTENANCE ATTACHMENTS ROUTES
+// ============================================================
+
+// GET ATTACHMENTS FOR MAINTENANCE RECORD
+app.get('/api/maintenance-attachments/:maintenanceId', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM maintenance_attachments WHERE maintenance_id = ? ORDER BY created_at DESC',
+      args: [req.params.maintenanceId]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching attachments:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// UPLOAD ATTACHMENT
+app.post('/api/maintenance-attachment/:maintenanceId', authenticateToken, async (req, res) => {
+  const { maintenanceId } = req.params;
+  const { filename, file_data, file_type } = req.body;
+
+  try {
+    const result = await db.execute({
+      sql: `
+        INSERT INTO maintenance_attachments (
+          maintenance_id,
+          filename,
+          original_filename,
+          file_data,
+          file_type,
+          uploaded_by
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING *
+      `,
+      args: [
+        maintenanceId,
+        filename,
+        filename,
+        file_data,
+        file_type || 'image/png',
+        req.user.username
+      ]
+    });
+
+    res.json({
+      success: true,
+      message: 'File uploaded successfully',
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error uploading attachment:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DOWNLOAD ATTACHMENT
+app.get('/api/maintenance-attachment/:id/download', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT * FROM maintenance_attachments WHERE id = ?',
+      args: [req.params.id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    const attachment = result.rows[0];
+    const fileBuffer = Buffer.from(attachment.file_data, 'base64');
+
+    res.setHeader('Content-Type', attachment.file_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${attachment.original_filename}"`);
+    res.send(fileBuffer);
+  } catch (err) {
+    console.error('Error downloading attachment:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE ATTACHMENT
+app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res) => {
+  try {
+    await db.execute({
+      sql: 'DELETE FROM maintenance_attachments WHERE id = ?',
+      args: [req.params.id]
+    });
+
+    res.json({
+      success: true,
+      message: 'Attachment deleted successfully'
+    });
+  } catch (err) {
+    console.error('Error deleting attachment:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// PARTS CRUD ROUTES (Basic)
 // ============================================================
 
 // GET ALL PARTS
@@ -457,804 +1160,6 @@ app.get('/api/parts/:id', authenticateToken, async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching part:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// CREATE PART
-app.post('/api/parts', authenticateToken, async (req, res) => {
-  const { 
-    part_number, 
-    description, 
-    manufacturer, 
-    compatible_gse, 
-    location_bin, 
-    min_stock,
-    quantity_on_hand,
-    unit_price,
-    current_price,
-    maintenance_type,
-    service_interval_hours,
-    service_interval_months,
-    service_interval_years,
-    contact_person,
-    contact_phone,
-    contact_email
-  } = req.body;
-  
-  try {
-    console.log('📝 Creating part:', { part_number, description, manufacturer });
-    
-    if (!part_number) {
-      return res.status(400).json({ error: 'Part number is required' });
-    }
-    
-    const existing = await db.execute({ 
-      sql: 'SELECT id FROM parts WHERE part_number = ?', 
-      args: [part_number] 
-    });
-    
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'Part number already exists' });
-    }
-    
-    const tableInfo = await db.execute("PRAGMA table_info(parts)");
-    const columns = tableInfo.rows.map(r => r.name);
-    
-    const insertFields = [];
-    const placeholders = [];
-    const values = [];
-    
-    const fieldMap = {
-      part_number, description, manufacturer, compatible_gse, location_bin,
-      min_stock: min_stock || 5,
-      quantity_on_hand: quantity_on_hand || 0,
-      unit_price: unit_price || 0,
-      current_price: current_price || 0,
-      average_cost: unit_price || 0,
-      last_purchase_price: unit_price || 0,
-      maintenance_type: maintenance_type || 'none',
-      service_interval_hours: service_interval_hours || 0,
-      service_interval_months: service_interval_months || 0,
-      service_interval_years: service_interval_years || 0,
-      contact_person: contact_person || '',
-      contact_phone: contact_phone || '',
-      contact_email: contact_email || ''
-    };
-    
-    for (const [key, value] of Object.entries(fieldMap)) {
-      if (columns.includes(key)) {
-        insertFields.push(key);
-        placeholders.push('?');
-        values.push(value);
-      }
-    }
-    
-    if (columns.includes('created_at')) {
-      insertFields.push('created_at');
-      placeholders.push('CURRENT_TIMESTAMP');
-    }
-    if (columns.includes('updated_at')) {
-      insertFields.push('updated_at');
-      placeholders.push('CURRENT_TIMESTAMP');
-    }
-    
-    const query = `INSERT INTO parts (${insertFields.join(', ')}) VALUES (${placeholders.join(', ')})`;
-    const result = await db.execute({ sql: query, args: values });
-    
-    const partId = result.lastInsertRowid;
-    console.log(`✅ Part inserted with ID: ${partId}`);
-    
-    if (maintenance_type && maintenance_type !== 'none') {
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        const eqName = part_number;
-        const eqType = manufacturer || 'GSE Part';
-        
-        const tables = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='gse_maintenance'");
-        if (tables.rows.length > 0) {
-          if (maintenance_type === 'year') {
-            await db.execute({
-              sql: `INSERT INTO gse_maintenance (equipment_name, equipment_type, maintenance_type, part_id, last_service_full_date, service_interval_years, status, created_by)
-                    VALUES (?, ?, 'year', ?, ?, ?, 'serviced', ?)`,
-              args: [eqName, eqType, partId, today, parseInt(service_interval_years) || 1, req.user.username]
-            });
-          } else if (maintenance_type === 'month') {
-            await db.execute({
-              sql: `INSERT INTO gse_maintenance (equipment_name, equipment_type, maintenance_type, part_id, last_service_date, service_interval_months, status, created_by)
-                    VALUES (?, ?, 'month', ?, ?, ?, 'serviced', ?)`,
-              args: [eqName, eqType, partId, today, parseInt(service_interval_months) || 6, req.user.username]
-            });
-          } else {
-            await db.execute({
-              sql: `INSERT INTO gse_maintenance (equipment_name, equipment_type, maintenance_type, part_id, last_service_date, service_interval_hours, target_hours, status, created_by)
-                    VALUES (?, ?, 'hour', ?, ?, ?, ?, 'serviced', ?)`,
-              args: [eqName, eqType, partId, today, parseInt(service_interval_hours) || 250, parseInt(service_interval_hours) || 250, req.user.username]
-            });
-          }
-          console.log(`✅ Maintenance record created for part: ${part_number}`);
-        }
-      } catch (e) {
-        console.log('⚠️ Could not create maintenance record:', e.message);
-      }
-    }
-    
-    if (unit_price > 0) {
-      try {
-        await db.execute({
-          sql: `INSERT INTO price_history (part_id, price, quantity, transaction_type, notes, recorded_by)
-                VALUES (?, ?, ?, 'INITIAL', 'Initial price set', ?)`,
-          args: [partId, unit_price, quantity_on_hand || 1, req.user.username]
-        });
-        console.log(`✅ Price history recorded for part: ${part_number}`);
-      } catch (e) {
-        console.log('⚠️ Could not record price history:', e.message);
-      }
-    }
-    
-    res.json({ 
-      success: true, 
-      message: 'Part added successfully!', 
-      id: Number(partId) 
-    });
-  } catch (err) {
-    console.error('Create part error:', err.message);
-    console.error('Stack:', err.stack);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// BULK IMPORT FROM EXCEL - FIXED
-// ============================================================
-app.post('/api/parts/bulk-import', authenticateToken, async (req, res) => {
-  const { parts } = req.body;
-  
-  console.log(`📊 Bulk import: Received ${parts?.length || 0} parts`);
-  
-  if (!parts || !Array.isArray(parts) || parts.length === 0) {
-    return res.status(400).json({ error: 'No parts data provided' });
-  }
-
-  try {
-    const tableInfo = await db.execute("PRAGMA table_info(parts)");
-    const columns = tableInfo.rows.map(r => r.name);
-    console.log('📋 Available columns:', columns.join(', '));
-
-    let inserted = 0;
-    let updated = 0;
-    let failed = 0;
-    const errors = [];
-
-    for (const part of parts) {
-      try {
-        const {
-          part_number,
-          description,
-          manufacturer,
-          compatible_gse,
-          location_bin,
-          min_stock,
-          stock,
-          unit_price,
-          current_price,
-          maintenance_type,
-          service_interval_hours,
-          service_interval_months,
-          service_interval_years,
-          contact_person,
-          contact_phone,
-          contact_email
-        } = part;
-
-        if (!part_number) {
-          failed++;
-          errors.push({ part: part_number || 'unknown', error: 'Part number is required' });
-          continue;
-        }
-
-        console.log(`📝 Processing: ${part_number} - ${description}`);
-
-        const existing = await db.execute({
-          sql: 'SELECT id FROM parts WHERE part_number = ?',
-          args: [part_number]
-        });
-
-        const fieldMap = {
-          'part_number': part_number,
-          'description': description || '',
-          'manufacturer': manufacturer || '',
-          'compatible_gse': compatible_gse || '',
-          'location_bin': location_bin || '',
-          'min_stock': min_stock || 5,
-          'quantity_on_hand': stock || 0,
-          'unit_price': unit_price || 0,
-          'current_price': current_price || 0,
-          'average_cost': unit_price || 0,
-          'last_purchase_price': unit_price || 0,
-          'maintenance_type': maintenance_type || 'none',
-          'service_interval_hours': service_interval_hours || 0,
-          'service_interval_months': service_interval_months || 0,
-          'service_interval_years': service_interval_years || 0,
-          'contact_person': contact_person || '',
-          'contact_phone': contact_phone || '',
-          'contact_email': contact_email || ''
-        };
-
-        if (existing.rows.length > 0) {
-          const updates = [];
-          const values = [];
-          
-          for (const [key, value] of Object.entries(fieldMap)) {
-            if (columns.includes(key)) {
-              updates.push(`${key} = ?`);
-              values.push(value);
-            }
-          }
-          updates.push('updated_at = CURRENT_TIMESTAMP');
-          values.push(part_number);
-
-          const query = `UPDATE parts SET ${updates.join(', ')} WHERE part_number = ?`;
-          await db.execute({ sql: query, args: values });
-          console.log(`   ✅ Updated: ${part_number}`);
-          updated++;
-
-        } else {
-          const insertFields = [];
-          const placeholders = [];
-          const values = [];
-
-          for (const [key, value] of Object.entries(fieldMap)) {
-            if (columns.includes(key)) {
-              insertFields.push(key);
-              placeholders.push('?');
-              values.push(value);
-            }
-          }
-
-          if (columns.includes('created_at')) {
-            insertFields.push('created_at');
-            placeholders.push('CURRENT_TIMESTAMP');
-          }
-          if (columns.includes('updated_at')) {
-            insertFields.push('updated_at');
-            placeholders.push('CURRENT_TIMESTAMP');
-          }
-
-          const query = `INSERT INTO parts (${insertFields.join(', ')}) VALUES (${placeholders.join(', ')})`;
-          const result = await db.execute({ sql: query, args: values });
-          console.log(`   ✅ Inserted: ${part_number} (ID: ${result.lastInsertRowid})`);
-          inserted++;
-
-          if (maintenance_type && maintenance_type !== 'none') {
-            try {
-              const today = new Date().toISOString().split('T')[0];
-              const eqName = part_number;
-              const eqType = manufacturer || 'GSE Part';
-              
-              const tables = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='gse_maintenance'");
-              if (tables.rows.length > 0) {
-                if (maintenance_type === 'year') {
-                  await db.execute({
-                    sql: `INSERT INTO gse_maintenance (equipment_name, equipment_type, maintenance_type, part_id, last_service_full_date, service_interval_years, status, created_by)
-                          VALUES (?, ?, 'year', ?, ?, ?, 'serviced', ?)`,
-                    args: [eqName, eqType, result.lastInsertRowid, today, parseInt(service_interval_years) || 1, req.user.username]
-                  });
-                } else if (maintenance_type === 'month') {
-                  await db.execute({
-                    sql: `INSERT INTO gse_maintenance (equipment_name, equipment_type, maintenance_type, part_id, last_service_date, service_interval_months, status, created_by)
-                          VALUES (?, ?, 'month', ?, ?, ?, 'serviced', ?)`,
-                    args: [eqName, eqType, result.lastInsertRowid, today, parseInt(service_interval_months) || 6, req.user.username]
-                  });
-                } else if (maintenance_type === 'hour') {
-                  await db.execute({
-                    sql: `INSERT INTO gse_maintenance (equipment_name, equipment_type, maintenance_type, part_id, last_service_date, service_interval_hours, target_hours, status, created_by)
-                          VALUES (?, ?, 'hour', ?, ?, ?, ?, 'serviced', ?)`,
-                    args: [eqName, eqType, result.lastInsertRowid, today, parseInt(service_interval_hours) || 250, parseInt(service_interval_hours) || 250, req.user.username]
-                  });
-                }
-                console.log(`   ✅ Maintenance record created for: ${part_number}`);
-              }
-            } catch (e) {
-              console.log(`   ⚠️ Could not create maintenance record: ${e.message}`);
-            }
-          }
-
-          if (unit_price > 0) {
-            try {
-              await db.execute({
-                sql: `INSERT INTO price_history (part_id, price, quantity, transaction_type, notes, recorded_by)
-                      VALUES (?, ?, ?, 'INITIAL', 'Initial price from Excel import', ?)`,
-                args: [result.lastInsertRowid, unit_price, stock || 1, req.user.username]
-              });
-              console.log(`   ✅ Price history recorded`);
-            } catch (e) {
-              console.log(`   ⚠️ Could not record price history: ${e.message}`);
-            }
-          }
-        }
-
-      } catch (rowError) {
-        console.error(`❌ Error processing row:`, rowError.message);
-        failed++;
-        errors.push({ part: part.part_number || 'unknown', error: rowError.message });
-      }
-    }
-
-    res.json({
-      success: true,
-      summary: {
-        inserted,
-        updated,
-        failed,
-        total: parts.length
-      },
-      errors: errors.length > 0 ? errors : undefined,
-      message: `✅ Import complete! ${inserted} new parts, ${updated} updated, ${failed} failed.`
-    });
-
-  } catch (err) {
-    console.error('❌ Bulk import error:', err.message);
-    console.error('Stack:', err.stack);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// UPDATE PART
-app.put('/api/parts/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-    return res.status(403).json({ error: 'Admin or Manager access required' });
-  }
-  
-  const { id } = req.params;
-  const {
-    part_number,
-    description,
-    manufacturer,
-    compatible_gse,
-    location_bin,
-    min_stock,
-    quantity_on_hand,
-    unit_price,
-    current_price,
-    maintenance_type,
-    service_interval_hours,
-    service_interval_months,
-    service_interval_years,
-    contact_person,
-    contact_phone,
-    contact_email
-  } = req.body;
-  
-  try {
-    const partResult = await db.execute({ sql: 'SELECT * FROM parts WHERE id = ?', args: [id] });
-    if (partResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-    
-    const oldPart = partResult.rows[0];
-    
-    await db.execute({
-      sql: `UPDATE parts SET 
-        part_number = ?,
-        description = ?,
-        manufacturer = ?,
-        compatible_gse = ?,
-        location_bin = ?,
-        min_stock = ?,
-        quantity_on_hand = ?,
-        unit_price = ?,
-        current_price = ?,
-        maintenance_type = ?,
-        service_interval_hours = ?,
-        service_interval_months = ?,
-        service_interval_years = ?,
-        contact_person = ?,
-        contact_phone = ?,
-        contact_email = ?,
-        updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-      args: [
-        part_number || oldPart.part_number,
-        description || oldPart.description,
-        manufacturer || oldPart.manufacturer,
-        compatible_gse || oldPart.compatible_gse,
-        location_bin || oldPart.location_bin,
-        min_stock || oldPart.min_stock,
-        quantity_on_hand || oldPart.quantity_on_hand,
-        unit_price || oldPart.unit_price,
-        current_price || oldPart.current_price,
-        maintenance_type || oldPart.maintenance_type,
-        service_interval_hours || oldPart.service_interval_hours,
-        service_interval_months || oldPart.service_interval_months,
-        service_interval_years || oldPart.service_interval_years,
-        contact_person || oldPart.contact_person,
-        contact_phone || oldPart.contact_phone,
-        contact_email || oldPart.contact_email,
-        id
-      ]
-    });
-    
-    res.json({ success: true, message: 'Part updated successfully' });
-  } catch (err) {
-    console.error('Update part error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE PART
-app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-    return res.status(403).json({ error: 'Admin or Manager access required' });
-  }
-  try {
-    const partResult = await db.execute({ sql: 'SELECT part_number FROM parts WHERE id = ?', args: [req.params.id] });
-    if (partResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-    const part = partResult.rows[0];
-    
-    await db.execute({ sql: 'DELETE FROM price_history WHERE part_id = ?', args: [req.params.id] });
-    await db.execute({ sql: 'DELETE FROM transactions WHERE part_id = ?', args: [req.params.id] });
-    await db.execute({ sql: 'DELETE FROM pending_issues WHERE part_id = ?', args: [req.params.id] });
-    await db.execute({ sql: 'DELETE FROM gse_maintenance WHERE part_id = ?', args: [req.params.id] });
-    await db.execute({ sql: 'DELETE FROM parts WHERE id = ?', args: [req.params.id] });
-    
-    res.json({ success: true, message: `✓ Part "${part.part_number}" deleted!` });
-  } catch (err) {
-    console.error('Delete part error:', err.message);
-    res.status(500).json({ error: 'Delete failed: ' + err.message });
-  }
-});
-
-// ============================================================
-// PRICE HISTORY ROUTES
-// ============================================================
-
-app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: 'SELECT * FROM price_history WHERE part_id = ? ORDER BY created_at DESC',
-      args: [req.params.partId]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Price history error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/price-history/full/:partId', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: `SELECT 
-        ph.*,
-        p.part_number,
-        p.description,
-        p.manufacturer
-      FROM price_history ph
-      JOIN parts p ON p.id = ph.part_id
-      WHERE ph.part_id = ?
-      ORDER BY ph.created_at DESC`,
-      args: [req.params.partId]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Full price history error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/price-history', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-    return res.status(403).json({ error: 'Admin or Manager access required' });
-  }
-
-  const { part_id, price, quantity, transaction_type, reference_number, notes } = req.body;
-  
-  try {
-    await db.execute({
-      sql: `INSERT INTO price_history (part_id, price, quantity, transaction_type, reference_number, notes, recorded_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: [part_id, price, quantity || 1, transaction_type || 'MANUAL', reference_number || '', notes || '', req.user.username]
-    });
-    
-    await db.execute({
-      sql: `UPDATE parts SET current_price = ?, unit_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      args: [price, price, part_id]
-    });
-    
-    res.json({ success: true, message: 'Price history added successfully' });
-  } catch (err) {
-    console.error('Add price history error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// TRANSACTIONS ROUTES
-// ============================================================
-
-app.get('/api/transactions', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute('SELECT * FROM transactions ORDER BY created_at DESC LIMIT 100');
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching transactions:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/transactions/part/:partId', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: 'SELECT * FROM transactions WHERE part_id = ? ORDER BY created_at DESC',
-      args: [req.params.partId]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching part transactions:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/transactions/receive', authenticateToken, async (req, res) => {
-  const { part_number, quantity, price, reference_number, notes } = req.body;
-  const receiveQty = parseInt(quantity);
-  const unitPrice = parseFloat(price) || 0;
-  
-  if (isNaN(receiveQty) || receiveQty <= 0) {
-    return res.status(400).json({ error: 'Invalid quantity' });
-  }
-  
-  try {
-    const partResult = await db.execute({ 
-      sql: 'SELECT id, quantity_on_hand, current_price, average_cost FROM parts WHERE part_number = ?', 
-      args: [part_number] 
-    });
-    
-    if (partResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-    
-    const part = partResult.rows[0];
-    const newQuantity = (part.quantity_on_hand || 0) + receiveQty;
-    
-    const currentTotalCost = (part.average_cost || 0) * (part.quantity_on_hand || 0);
-    const newTotalCost = currentTotalCost + (unitPrice * receiveQty);
-    const newAverageCost = newQuantity > 0 ? newTotalCost / newQuantity : 0;
-    
-    await db.execute({ 
-      sql: `UPDATE parts SET 
-            quantity_on_hand = ?, 
-            current_price = ?,
-            last_purchase_price = ?,
-            average_cost = ?,
-            updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?`, 
-      args: [newQuantity, unitPrice, unitPrice, newAverageCost, part.id] 
-    });
-    
-    await db.execute({ 
-      sql: `INSERT INTO transactions (part_id, transaction_type, quantity, price, reference_number, notes, created_by, created_at) 
-            VALUES (?, 'RECEIVE', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, 
-      args: [part.id, receiveQty, unitPrice, reference_number || '', notes || '', req.user.username] 
-    });
-    
-    await db.execute({ 
-      sql: `INSERT INTO price_history (part_id, price, quantity, transaction_type, reference_number, notes, recorded_by) 
-            VALUES (?, ?, ?, 'RECEIVE', ?, ?, ?)`, 
-      args: [part.id, unitPrice, receiveQty, reference_number || '', notes || '', req.user.username] 
-    });
-    
-    res.json({ 
-      success: true, 
-      message: `✅ ${receiveQty} units received at $${unitPrice.toFixed(2)} each`,
-      new_stock: newQuantity,
-      average_cost: newAverageCost,
-      current_price: unitPrice
-    });
-  } catch (err) {
-    console.error('Receive error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// PENDING ISSUES / APPROVALS ROUTES
-// ============================================================
-
-app.get('/api/requests/pending', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-  try {
-    const result = await db.execute("SELECT * FROM pending_issues WHERE status = 'pending' ORDER BY created_at DESC");
-    res.json({ success: true, requests: result.rows });
-  } catch (err) {
-    console.error('Error fetching pending requests:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/requests/my-requests', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute('SELECT * FROM pending_issues WHERE requested_by = ? ORDER BY created_at DESC', [req.user.id]);
-    res.json({ success: true, requests: result.rows });
-  } catch (err) {
-    console.error('Error fetching my requests:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/requests/issue', authenticateToken, async (req, res) => {
-  const { part_number, quantity, gse_registration, technician_name, work_order, notes } = req.body;
-  const requestQty = parseInt(quantity);
-  if (isNaN(requestQty) || requestQty <= 0) {
-    return res.status(400).json({ error: 'Invalid quantity' });
-  }
-  
-  try {
-    const partResult = await db.execute({ 
-      sql: 'SELECT id, quantity_on_hand FROM parts WHERE part_number = ?', 
-      args: [part_number] 
-    });
-    
-    if (partResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-    
-    const part = partResult.rows[0];
-    if ((part.quantity_on_hand || 0) < requestQty) {
-      return res.status(400).json({ error: `Insufficient stock! Only ${part.quantity_on_hand} units available.` });
-    }
-    
-    await db.execute({ 
-      sql: `INSERT INTO pending_issues (part_number, part_id, quantity, gse_registration, technician_name, work_order, notes, requested_by, requested_by_name, status, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)`, 
-      args: [part_number, part.id, requestQty, gse_registration || '', technician_name || '', work_order || '', notes || '', req.user.id, req.user.username] 
-    });
-    
-    res.json({ success: true, message: 'Issue request submitted for approval' });
-  } catch (err) {
-    console.error('Submit error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { comment } = req.body;
-  
-  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-  
-  try {
-    const requestResult = await db.execute({ 
-      sql: "SELECT * FROM pending_issues WHERE id = ? AND status = 'pending'", 
-      args: [id] 
-    });
-    
-    if (requestResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Request not found' });
-    }
-    
-    const request = requestResult.rows[0];
-    const requestQty = parseInt(request.quantity);
-    
-    const partResult = await db.execute({ 
-      sql: 'SELECT quantity_on_hand FROM parts WHERE id = ?', 
-      args: [request.part_id] 
-    });
-    
-    const currentStock = partResult.rows[0].quantity_on_hand;
-    const newStock = currentStock - requestQty;
-    
-    if (currentStock < requestQty) {
-      return res.status(400).json({ error: `Insufficient stock! Only ${currentStock} units available.` });
-    }
-    
-    await db.execute({ 
-      sql: `INSERT INTO transactions (part_id, transaction_type, quantity, gse_registration, technician_name, work_order, notes, created_by, created_at) 
-            VALUES (?, 'ISSUE', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, 
-      args: [request.part_id, requestQty, request.gse_registration || '', request.technician_name || '', request.work_order || '', request.notes || '', req.user.username] 
-    });
-    
-    await db.execute({ 
-      sql: 'UPDATE parts SET quantity_on_hand = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-      args: [newStock, request.part_id] 
-    });
-    
-    await db.execute({ 
-      sql: "UPDATE pending_issues SET status = 'approved', admin_comment = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?", 
-      args: [comment || null, req.user.username, id] 
-    });
-    
-    res.json({ success: true, message: 'Request approved and stock deducted' });
-  } catch (err) {
-    console.error('Approve error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/requests/:id/reject', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { comment } = req.body;
-  
-  if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-  
-  try {
-    await db.execute({ 
-      sql: "UPDATE pending_issues SET status = 'rejected', admin_comment = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?", 
-      args: [comment || null, req.user.username, id] 
-    });
-    
-    res.json({ success: true, message: 'Request rejected' });
-  } catch (err) {
-    console.error('Reject error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// MAINTENANCE ROUTES
-// ============================================================
-
-app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute('SELECT * FROM gse_maintenance ORDER BY equipment_name');
-    res.json({ success: true, equipment: result.rows });
-  } catch (err) {
-    console.error('Error fetching maintenance:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/gse-maintenance/part/:partId', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: 'SELECT * FROM gse_maintenance WHERE part_id = ?',
-      args: [req.params.partId]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching maintenance:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// REPORTS AND DASHBOARD
-// ============================================================
-
-app.get('/api/reports/low-stock', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute('SELECT part_number, description, quantity_on_hand, min_stock, location_bin FROM parts WHERE quantity_on_hand <= min_stock');
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching low stock report:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
-  try {
-    const lowStock = await db.execute('SELECT COUNT(*) as count FROM parts WHERE quantity_on_hand <= min_stock');
-    const pendingRequests = await db.execute("SELECT COUNT(*) as count FROM pending_issues WHERE status = 'pending'");
-    const totalParts = await db.execute('SELECT COUNT(*) as count FROM parts');
-    const totalMaintenance = await db.execute('SELECT COUNT(*) as count FROM gse_maintenance');
-
-    res.json({
-      lowStockCount: Number(lowStock.rows[0]?.count || 0),
-      pendingRequests: Number(pendingRequests.rows[0]?.count || 0),
-      totalParts: Number(totalParts.rows[0]?.count || 0),
-      totalMaintenance: Number(totalMaintenance.rows[0]?.count || 0)
-    });
-  } catch (err) {
-    console.error('Dashboard summary error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1287,6 +1192,16 @@ const startServer = async () => {
       console.log(`   admin / 1991 (Admin)`);
       console.log(`   manager / manager123 (Manager)`);
       console.log(`   storekeeper / keeper123 (Storekeeper)`);
+      console.log(`\n📊 Maintenance API Endpoints:`);
+      console.log(`   GET    /api/gse-maintenance - All equipment with status`);
+      console.log(`   POST   /api/gse-maintenance - Add equipment`);
+      console.log(`   PUT    /api/gse-maintenance/:id - Update equipment`);
+      console.log(`   DELETE /api/gse-maintenance/:id - Delete equipment`);
+      console.log(`   PUT    /api/gse-maintenance/:id/hours - Update hours`);
+      console.log(`   POST   /api/gse-maintenance/:id/service - Record service`);
+      console.log(`   GET    /api/maintenance-attachments/:id - Get attachments`);
+      console.log(`   POST   /api/maintenance-attachment/:id - Upload attachment`);
+      console.log(`   DELETE /api/maintenance-attachment/:id - Delete attachment`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
