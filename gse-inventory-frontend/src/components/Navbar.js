@@ -37,6 +37,8 @@ const Navbar = ({ user, token, onLogout }) => {
         )}
         <Link to="/maintenance" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>🔧 Maintenance</Link>
         <Link to="/transactions" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>📜 History</Link>
+        {/* UPDATED: Changed from /service-history to /maintenance-history */}
+        <Link to="/maintenance-history" style={{ color: '#5dade2', textDecoration: 'none', fontWeight: 'bold', padding: '6px 12px' }}>📋 Service History</Link>
         <Link to="/reports" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>📊 Reports</Link>
         {user?.role === 'admin' && (
           <Link to="/users" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>👥 Users</Link>
