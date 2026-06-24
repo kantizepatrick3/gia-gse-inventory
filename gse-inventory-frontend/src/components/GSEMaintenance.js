@@ -1,3 +1,4 @@
+// FORCE DEPLOY: next_service_date fix - June 22, 2026
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -17,6 +18,23 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   const [uploading, setUploading] = useState(false);
   const [hoursUpdate, setHoursUpdate] = useState({});
   const [showHoursModal, setShowHoursModal] = useState(null);
+  
+  // ============================================================
+  // CRITICAL FIX: Helper function to format date
+  // ============================================================
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not scheduled';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+    } catch (e) {
+      return 'Not scheduled';
+    }
+  };
   
   const [newEquipment, setNewEquipment] = useState({
     equipment_name: '',
@@ -61,6 +79,9 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     last_service_year: null
   });
 
+  // ============================================================
+  // CRITICAL FIX: Use GIA backend URL (NOT CAS)
+  // ============================================================
   const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   useEffect(() => {
@@ -77,6 +98,20 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       const response = await axios.get(`${API_URL}/api/gse-maintenance`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      console.log('🔧 Fetching maintenance data from:', `${API_URL}/api/gse-maintenance`);
+      console.log('🔧 Full API response:', response.data);
+      console.log('🔧 Response type:', typeof response.data);
+      console.log('🔧 Has equipment property?', !!response.data.equipment);
+      console.log('🔧 Success status:', response.data.success);
+      
+      if (response.data.equipment) {
+        console.log('✅ Found equipment array in response.data.equipment');
+        console.log('🔧 Setting equipment data:', response.data.equipment.length, 'records');
+        console.log('🔧 Sample equipment record:', response.data.equipment[0]);
+        console.log('🔧 Available fields:', Object.keys(response.data.equipment[0] || {}));
+        console.log('🔧 First equipment name:', response.data.equipment[0]?.equipment_name);
+        console.log('🔧 Status:', response.data.equipment[0]?.status);
+      }
       setEquipment(response.data.equipment || []);
     } catch (err) {
       console.error('Error fetching equipment:', err);
@@ -308,7 +343,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       } else if (editData.maintenance_type === 'month') {
         payload.service_interval_months = parseInt(editData.service_interval_months);
         payload.last_service_date = editData.last_service_date;
-        // Update next_service_date based on new interval
         if (editData.last_service_date && editData.service_interval_months) {
           const nextDate = new Date(editData.last_service_date);
           nextDate.setMonth(nextDate.getMonth() + parseInt(editData.service_interval_months));
@@ -318,7 +352,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         payload.service_interval_years = parseInt(editData.service_interval_years);
         payload.last_service_year = editData.last_service_year;
         payload.last_service_full_date = editData.last_service_full_date;
-        // Update next_service_date based on new interval
         if (editData.last_service_full_date && editData.service_interval_years) {
           const nextDate = new Date(editData.last_service_full_date);
           nextDate.setFullYear(nextDate.getFullYear() + parseInt(editData.service_interval_years));
@@ -587,7 +620,12 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   <td style={{ border: '1px solid #ddd', padding: '8px' }}>{getMaintenanceTypeIcon(eq)}</td>
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px' }}>{eq.current_service_display || eq.last_service_date || eq.last_service_year || 'Not recorded'}</td>
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px' }}>{eq.maintenance_type === 'hour' && `${eq.current_hours || 0} / ${eq.target_hours || eq.service_interval_hours || 0} hrs`}{eq.maintenance_type !== 'hour' && '-'}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', fontWeight: 'bold', color: statusStyle.color === '#e74c3c' ? '#e74c3c' : (statusStyle.color === '#f39c12' ? '#f39c12' : '#0066cc') }}>{eq.next_service_column || eq.next_due_display || 'Not scheduled'}</td>
+                  {/* ============================================================
+                  FIXED: Next Service column using formatDate
+                  ============================================================ */}
+                  <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', fontWeight: 'bold', color: statusStyle.color === '#e74c3c' ? '#e74c3c' : (statusStyle.color === '#f39c12' ? '#f39c12' : '#0066cc') }}>
+                    {formatDate(eq.next_service_date)}
+                  </td>
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold', color: statusStyle.color }}>{getRemainingDisplay(eq)}{eq.alert_reason && <div style={{ fontSize: '10px' }}>{eq.alert_reason}</div>}</td>
                   <td style={{ border: '1px solid #ddd', padding: '8px' }}><span style={{ color: statusStyle.color, fontWeight: 'bold' }}>{statusStyle.text}</span></td>
                   <td style={{ border: '1px solid #ddd', padding: '8px' }}>
@@ -667,7 +705,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         </div>
       )}
 
-      {/* Edit Modal - FIXED to update maintenance table */}
+      {/* Edit Modal */}
       {editMode && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '600px', maxWidth: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
