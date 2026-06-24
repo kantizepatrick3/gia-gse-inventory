@@ -6,6 +6,7 @@ import PartsList from './components/PartsList';
 import ReceivePart from './components/ReceivePart';
 import IssuePart from './components/IssuePart';
 import Transactions from './components/Transactions';
+import ServiceHistoryReport from './components/ServiceHistoryReport';
 import Navbar from './components/Navbar';
 import './App.css';
 
@@ -48,6 +49,7 @@ function App() {
           <Route path="/receive" element={<ReceivePart token={token} />} />
           <Route path="/issue" element={<IssuePart token={token} />} />
           <Route path="/transactions" element={<Transactions token={token} />} />
+          <Route path="/service-history" element={<ServiceHistoryReport token={token} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </div>
