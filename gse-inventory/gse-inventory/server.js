@@ -439,7 +439,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ============================================================
-// GSE MAINTENANCE ROUTES - COMPLETE
+// GSE MAINTENANCE ROUTES
 // ============================================================
 
 // GET ALL MAINTENANCE
@@ -455,7 +455,6 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
       ORDER BY gm.equipment_name
     `);
     
-    // Enhance each record with calculated fields matching frontend expectations
     const enhanced = result.rows.map(item => {
       let daysRemaining = null;
       let hoursRemaining = null;
@@ -463,21 +462,17 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
       let daysOverdue = 0;
       let alertReason = null;
 
-      // Calculate days remaining if next_service_date exists
       if (item.next_service_date) {
         daysRemaining = calculateDaysUntil(item.next_service_date);
       }
 
-      // Calculate hours remaining for hour-based maintenance
       if (item.maintenance_type === 'hour' && item.target_hours && item.current_hours !== undefined) {
         hoursRemaining = parseInt(item.target_hours) - (parseInt(item.current_hours) || 0);
       }
 
-      // Determine status based on conditions
       if (item.maintenance_type === 'none') {
         status = 'no_maintenance';
       } else if (item.maintenance_type === 'hour') {
-        // Check both conditions
         if (daysRemaining !== null && daysRemaining < 0) {
           status = 'overdue';
           daysOverdue = Math.abs(daysRemaining);
@@ -521,7 +516,6 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
         }
       }
 
-      // Build display values for frontend
       let currentServiceDisplay = 'Not recorded';
       if (item.maintenance_type === 'hour') {
         if (item.last_service_date && item.last_service_hours !== undefined) {
@@ -535,7 +529,6 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
         currentServiceDisplay = item.last_service_year ? `${item.last_service_year}` : 'Not recorded';
       }
 
-      // Return enhanced object matching frontend expectations
       return {
         ...item,
         days_remaining: daysRemaining,
@@ -545,15 +538,12 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
         alert_reason: alertReason,
         current_service_display: currentServiceDisplay,
         next_service_column: item.next_service_date ? new Date(item.next_service_date).toLocaleDateString() : 'Not scheduled',
-        // Important: Keep next_service_date as ISO string for frontend formatDate function
         next_service_date: item.next_service_date,
         status: status,
-        // For month-based display
         days_remaining_display: daysRemaining !== null ? daysRemaining : 'N/A'
       };
     });
 
-    console.log(`✅ Returning ${enhanced.length} maintenance records`);
     res.json({ success: true, equipment: enhanced });
   } catch (err) {
     console.error('Error fetching maintenance:', err.message);
@@ -604,13 +594,9 @@ app.post('/api/gse-maintenance', authenticateToken, async (req, res) => {
     let nextServiceYear = null;
     let status = 'serviced';
 
-    // Calculate next service based on maintenance type
     if (maintenance_type === 'hour') {
       if (service_interval_months_for_hour && service_interval_months_for_hour > 0 && last_service_date) {
         nextServiceDate = calculateNextServiceDate(last_service_date, service_interval_months_for_hour);
-      }
-      if (service_interval_hours) {
-        // target_hours is the same as service_interval_hours for hour-based
       }
     } else if (maintenance_type === 'month') {
       if (last_service_date && service_interval_months && service_interval_months > 0) {
@@ -847,7 +833,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     let nextServiceYear = null;
     let status = 'serviced';
 
-    // Calculate next service based on maintenance type
     if (equipment.maintenance_type === 'hour') {
       const intervalMonths = months_interval || equipment.service_interval_months_for_hour || 0;
       if (intervalMonths > 0 && service_date) {
@@ -1009,7 +994,6 @@ app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Equipment not found' });
     }
 
-    // Delete associated records first
     await db.execute({
       sql: 'DELETE FROM service_history WHERE maintenance_id = ?',
       args: [id]
@@ -1037,7 +1021,7 @@ app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
 // MAINTENANCE ATTACHMENTS ROUTES
 // ============================================================
 
-// GET ATTACHMENTS FOR MAINTENANCE RECORD
+// GET ATTACHMENTS
 app.get('/api/maintenance-attachments/:maintenanceId', authenticateToken, async (req, res) => {
   try {
     const result = await db.execute({
@@ -1133,7 +1117,150 @@ app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res
 });
 
 // ============================================================
-// PARTS CRUD ROUTES (Basic)
+// SERVICE HISTORY REPORT ENDPOINTS
+// ============================================================
+
+// GET ALL SERVICE HISTORY WITH FILTERS
+app.get('/api/service-history/all', authenticateToken, async (req, res) => {
+  try {
+    const { startDate, endDate, equipmentName, technician, category } = req.query;
+    
+    console.log('📊 Service History Report Request:');
+    console.log('   Start Date:', startDate);
+    console.log('   End Date:', endDate);
+    console.log('   Equipment:', equipmentName);
+    console.log('   Technician:', technician);
+    console.log('   Category:', category);
+    
+    let query = `
+      SELECT 
+        sh.id,
+        sh.maintenance_id,
+        sh.equipment_name,
+        sh.equipment_type,
+        sh.maintenance_type,
+        sh.service_date,
+        sh.service_performed as services_performed,
+        sh.technician_name as technician,
+        sh.notes,
+        sh.maintenance_category as category,
+        sh.current_hours,
+        sh.target_hours,
+        sh.service_interval_months,
+        sh.service_interval_years,
+        sh.recorded_by,
+        sh.created_at,
+        gm.status,
+        gm.next_service_date,
+        gm.last_service_date
+      FROM service_history sh
+      LEFT JOIN gse_maintenance gm ON gm.id = sh.maintenance_id
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (startDate) {
+      query += ` AND date(sh.service_date) >= date(?)`;
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      query += ` AND date(sh.service_date) <= date(?)`;
+      params.push(endDate);
+    }
+    
+    if (equipmentName) {
+      query += ` AND sh.equipment_name LIKE ?`;
+      params.push(`%${equipmentName}%`);
+    }
+    
+    if (technician) {
+      query += ` AND sh.technician_name LIKE ?`;
+      params.push(`%${technician}%`);
+    }
+    
+    if (category && category !== 'All Categories') {
+      query += ` AND sh.maintenance_category = ?`;
+      params.push(category);
+    }
+    
+    query += ` ORDER BY sh.service_date DESC`;
+    
+    console.log('📝 Executing query with params:', params);
+    
+    const result = await db.execute({ sql: query, args: params });
+    
+    console.log(`✅ Found ${result.rows.length} service history records`);
+    
+    const enhanced = result.rows.map(row => ({
+      ...row,
+      service_date: row.service_date ? row.service_date : null,
+      next_service_date: row.next_service_date ? row.next_service_date : null,
+      status: row.status ? row.status.toUpperCase() : 'UNKNOWN'
+    }));
+    
+    res.json(enhanced);
+  } catch (err) {
+    console.error('❌ Error fetching service history:', err.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch service history',
+      details: err.message 
+    });
+  }
+});
+
+// GET SERVICE HISTORY BY EQUIPMENT
+app.get('/api/service-history/equipment/:equipmentId', authenticateToken, async (req, res) => {
+  try {
+    const { equipmentId } = req.params;
+    
+    const result = await db.execute({
+      sql: `
+        SELECT 
+          sh.*,
+          gm.status,
+          gm.next_service_date,
+          gm.last_service_date
+        FROM service_history sh
+        LEFT JOIN gse_maintenance gm ON gm.id = sh.maintenance_id
+        WHERE sh.maintenance_id = ?
+        ORDER BY sh.service_date DESC
+      `,
+      args: [equipmentId]
+    });
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching equipment history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET SERVICE HISTORY STATISTICS
+app.get('/api/service-history/stats', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute(`
+      SELECT 
+        COUNT(*) as total_services,
+        COUNT(DISTINCT maintenance_id) as unique_equipment,
+        COUNT(DISTINCT technician_name) as unique_technicians,
+        SUM(CASE WHEN gm.status = 'serviced' THEN 1 ELSE 0 END) as serviced_count,
+        SUM(CASE WHEN gm.status = 'overdue' THEN 1 ELSE 0 END) as overdue_count,
+        SUM(CASE WHEN gm.status = 'due_soon' THEN 1 ELSE 0 END) as due_soon_count
+      FROM service_history sh
+      LEFT JOIN gse_maintenance gm ON gm.id = sh.maintenance_id
+    `);
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching service stats:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// PARTS CRUD ROUTES
 // ============================================================
 
 // GET ALL PARTS
@@ -1164,6 +1291,15 @@ app.get('/api/parts/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// HEALTH CHECK
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 // ============================================================
 // START SERVER
 // ============================================================
@@ -1192,16 +1328,10 @@ const startServer = async () => {
       console.log(`   admin / 1991 (Admin)`);
       console.log(`   manager / manager123 (Manager)`);
       console.log(`   storekeeper / keeper123 (Storekeeper)`);
-      console.log(`\n📊 Maintenance API Endpoints:`);
-      console.log(`   GET    /api/gse-maintenance - All equipment with status`);
-      console.log(`   POST   /api/gse-maintenance - Add equipment`);
-      console.log(`   PUT    /api/gse-maintenance/:id - Update equipment`);
-      console.log(`   DELETE /api/gse-maintenance/:id - Delete equipment`);
-      console.log(`   PUT    /api/gse-maintenance/:id/hours - Update hours`);
-      console.log(`   POST   /api/gse-maintenance/:id/service - Record service`);
-      console.log(`   GET    /api/maintenance-attachments/:id - Get attachments`);
-      console.log(`   POST   /api/maintenance-attachment/:id - Upload attachment`);
-      console.log(`   DELETE /api/maintenance-attachment/:id - Delete attachment`);
+      console.log(`\n📊 Service History API:`);
+      console.log(`   GET /api/service-history/all - All history with filters`);
+      console.log(`   GET /api/service-history/equipment/:id - By equipment`);
+      console.log(`   GET /api/service-history/stats - Statistics`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
