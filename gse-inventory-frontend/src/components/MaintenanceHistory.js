@@ -67,7 +67,8 @@ const MaintenanceHistory = ({ token }) => {
             target_hours: found.target_hours,
             maintenance_type: found.maintenance_type,
             maintenance_category: found.maintenance_category,
-            category: found.maintenance_category || found.category
+            category: found.maintenance_category || found.category,
+            service_performed: found.service_performed
           };
         }
       }
@@ -194,6 +195,16 @@ const MaintenanceHistory = ({ token }) => {
     }
   };
 
+  // Get last service performed for equipment
+  const getLastServicePerformed = (item) => {
+    // Check if equipment has service_performed field
+    if (item.service_performed) {
+      return item.service_performed;
+    }
+    // Otherwise return 'No service recorded'
+    return 'No service recorded';
+  };
+
   // ============================================================
   // EXPORT TO EXCEL
   // ============================================================
@@ -213,8 +224,6 @@ const MaintenanceHistory = ({ token }) => {
         'Technician': h.technician || h.technician_name || 'System',
         'Category': h.category || 'Not specified',
         'Hours at Service': h.hours_at_service || h.current_hours || 0,
-        'Next Service Due': h.next_service_due ? formatDate(h.next_service_due) : 'TBD',
-        'Interval (Months)': h.interval_months || h.service_interval_months || 0,
         'Notes': h.notes || ''
       }));
 
@@ -228,8 +237,6 @@ const MaintenanceHistory = ({ token }) => {
         { wch: 20 },  // Technician
         { wch: 15 },  // Category
         { wch: 15 },  // Hours at Service
-        { wch: 20 },  // Next Service Due
-        { wch: 18 },  // Interval (Months)
         { wch: 30 }   // Notes
       ];
 
@@ -311,15 +318,13 @@ const MaintenanceHistory = ({ token }) => {
     setExportLoading(true);
     
     try {
-      const headers = ['Service Date', 'Service Performed', 'Technician', 'Category', 'Hours at Service', 'Next Service Due', 'Interval (Months)', 'Notes'];
+      const headers = ['Service Date', 'Service Performed', 'Technician', 'Category', 'Hours at Service', 'Notes'];
       const rows = history.map(h => [
         h.service_date || '',
         h.service_performed || '',
         h.technician || h.technician_name || '',
         h.category || 'Not specified',
         h.hours_at_service || h.current_hours || 0,
-        h.next_service_due || '',
-        h.interval_months || h.service_interval_months || 0,
         h.notes || ''
       ]);
       
@@ -402,7 +407,7 @@ const MaintenanceHistory = ({ token }) => {
       {loading && <div className="loading">Loading...</div>}
 
       {/* ============================================================
-          MAIN TABLE - Equipment List with Category Badges
+          MAIN TABLE - Equipment List with Service Performed Column
           ============================================================ */}
       <div className="equipment-list">
         <table className="maintenance-table">
@@ -413,6 +418,7 @@ const MaintenanceHistory = ({ token }) => {
               <th>Status</th>
               <th>Last Service</th>
               <th>Next Service</th>
+              <th style={{ minWidth: '180px' }}>Service Performed</th>
               <th>Maintenance Category</th>
               <th>Action</th>
             </tr>
@@ -420,13 +426,14 @@ const MaintenanceHistory = ({ token }) => {
           <tbody>
             {filteredEquipment.length === 0 && !loading && (
               <tr>
-                <td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
+                <td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
                   No equipment found
                 </td>
               </tr>
             )}
             {filteredEquipment.map(item => {
               const categoryBadge = getCategoryBadge(item.maintenance_category || item.category);
+              const lastService = getLastServicePerformed(item);
               return (
                 <tr key={item.id}>
                   <td><strong>{item.equipment_name}</strong></td>
@@ -438,6 +445,14 @@ const MaintenanceHistory = ({ token }) => {
                   </td>
                   <td>{item.last_service_date ? formatDate(item.last_service_date) : 'Never'}</td>
                   <td>{item.next_service_date ? formatDate(item.next_service_date) : 'Not scheduled'}</td>
+                  <td style={{
+                    fontWeight: '500',
+                    color: '#1a5276',
+                    maxWidth: '200px',
+                    wordBreak: 'break-word'
+                  }}>
+                    {lastService}
+                  </td>
                   <td>
                     <span style={{
                       padding: '4px 12px',
@@ -496,7 +511,7 @@ const MaintenanceHistory = ({ token }) => {
           <div style={{
             backgroundColor: 'white',
             borderRadius: '12px',
-            maxWidth: '1200px',
+            maxWidth: '1100px',
             width: '95%',
             maxHeight: '90vh',
             overflow: 'auto',
@@ -515,7 +530,7 @@ const MaintenanceHistory = ({ token }) => {
               gap: '10px'
             }}>
               <h3 style={{ margin: 0, color: '#2c3e50' }}>
-                📋 Maintenance History for {selectedEquipment.name || selectedEquipment.equipment_name || 'Equipment'}
+                📋 Service History for {selectedEquipment.name || selectedEquipment.equipment_name || 'Equipment'}
               </h3>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                 <button 
@@ -598,7 +613,8 @@ const MaintenanceHistory = ({ token }) => {
                 <div>
                   <span style={{ fontSize: '12px', color: '#666' }}>Hours:</span>
                   <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                    {selectedEquipment.current_hours} / {selectedEquipment.target_hours || 'N/A'}
+                    {selectedEquipment.current_hours}
+                    {selectedEquipment.target_hours && ` / ${selectedEquipment.target_hours}`}
                   </span>
                 </div>
               )}
@@ -626,9 +642,7 @@ const MaintenanceHistory = ({ token }) => {
               </div>
             </div>
 
-            {/* ============================================================
-                SERVICE HISTORY TABLE - With Enhanced Service Performed
-                ============================================================ */}
+            {/* Service History Table */}
             {history.length === 0 ? (
               <div style={{
                 textAlign: 'center',
@@ -661,7 +675,8 @@ const MaintenanceHistory = ({ token }) => {
                         textAlign: 'left', 
                         border: '1px solid #ddd',
                         minWidth: '200px',
-                        backgroundColor: '#1a5276'
+                        backgroundColor: '#1a5276',
+                        color: 'white'
                       }}>
                         🔧 Service Performed
                       </th>
@@ -688,7 +703,8 @@ const MaintenanceHistory = ({ token }) => {
                             padding: '8px', 
                             border: '1px solid #ddd',
                             fontWeight: '600',
-                            color: '#1a5276'
+                            color: '#1a5276',
+                            backgroundColor: '#eaf2f8'
                           }}>
                             {h.service_performed || 'Maintenance recorded'}
                           </td>
