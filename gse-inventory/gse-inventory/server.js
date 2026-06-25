@@ -133,10 +133,10 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
           location_bin,
           supplier,
           po_number,
+          price_notes,
           notes: itemNotes
         } = item;
 
-        // Validate required fields
         if (!part_id && !part_number) {
           results.errors.push({ row: index + 1, error: 'Missing part_id or part_number' });
           continue;
@@ -146,7 +146,6 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
         const sanitizedUnitPrice = sanitizeNumber(unit_price, 0);
         const sanitizedTotalPrice = sanitizeNumber(total_price, sanitizedUnitPrice * sanitizedQuantity);
 
-        // Find the part
         let partResult;
         if (part_id) {
           partResult = await db.execute({
@@ -174,7 +173,6 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
         const oldPrice = part.current_price || 0;
         const newQuantity = oldQuantity + sanitizedQuantity;
 
-        // Update part stock
         await db.execute({
           sql: `
             UPDATE parts SET
@@ -185,8 +183,9 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
           args: [newQuantity, partId]
         });
 
-        // If price is provided, update the current price
         let priceUpdated = false;
+        let priceChangeDetails = '';
+
         if (sanitizedUnitPrice > 0) {
           await db.execute({
             sql: `
@@ -200,7 +199,14 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
             args: [sanitizedUnitPrice, sanitizedUnitPrice, sanitizedUnitPrice, partId]
           });
 
-          // Record in price history
+          const historyNotes = [
+            `Received ${sanitizedQuantity} units @ $${sanitizedUnitPrice.toFixed(2)} each`,
+            price_notes ? `(${price_notes})` : '',
+            itemNotes ? `Notes: ${itemNotes}` : '',
+            supplier ? `Supplier: ${supplier}` : '',
+            po_number ? `PO: ${po_number}` : ''
+          ].filter(Boolean).join(' | ');
+
           await db.execute({
             sql: `
               INSERT INTO price_history (
@@ -214,23 +220,28 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
               sanitizedQuantity,
               'RECEIVE',
               po_number || '',
-              `Received ${sanitizedQuantity} units @ ${sanitizedUnitPrice} each. ${itemNotes || ''}`,
+              historyNotes || `Received ${sanitizedQuantity} units @ $${sanitizedUnitPrice.toFixed(2)} each`,
               req.user.username
             ]
           });
 
           priceUpdated = true;
+          priceChangeDetails = `Price updated from $${oldPrice.toFixed(2)} to $${sanitizedUnitPrice.toFixed(2)}`;
+          
           results.priceHistoryUpdated.push({
             part_number: part.part_number,
             old_price: oldPrice,
             new_price: sanitizedUnitPrice,
-            quantity: sanitizedQuantity
+            quantity: sanitizedQuantity,
+            total_price: sanitizedTotalPrice
           });
 
-          console.log(`💰 Price updated for ${part.part_number}: ${oldPrice} → ${sanitizedUnitPrice}`);
+          console.log(`💰 Price updated for ${part.part_number}: $${oldPrice} → $${sanitizedUnitPrice}`);
+        } else {
+          priceChangeDetails = 'Price unchanged (no new price provided)';
+          console.log(`ℹ️ No price change for ${part.part_number}`);
         }
 
-        // Record transaction
         await db.execute({
           sql: `
             INSERT INTO transactions (
@@ -248,7 +259,7 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
             supplier || '',
             po_number || '',
             po_number || '',
-            `Received ${sanitizedQuantity} units. ${itemNotes || ''}`,
+            `Received ${sanitizedQuantity} units. ${priceChangeDetails}. ${itemNotes || ''}`,
             req.user.username
           ]
         });
@@ -260,10 +271,12 @@ app.post('/api/receive-parts', authenticateToken, async (req, res) => {
           new_quantity: newQuantity,
           added_quantity: sanitizedQuantity,
           unit_price: sanitizedUnitPrice,
-          price_updated: priceUpdated
+          total_price: sanitizedTotalPrice,
+          price_updated: priceUpdated,
+          price_change: priceChangeDetails
         });
 
-        console.log(`✅ Received ${sanitizedQuantity} of ${part.part_number}`);
+        console.log(`✅ Received ${sanitizedQuantity} of ${part.part_number} at $${sanitizedUnitPrice.toFixed(2)} each`);
 
       } catch (rowError) {
         console.error(`❌ Error processing row ${index + 1}:`, rowError.message);
@@ -368,7 +381,7 @@ app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
   }
 });
 
-// GET FULL PRICE HISTORY
+// GET FULL PRICE HISTORY (No limit)
 app.get('/api/price-history/full/:partId', authenticateToken, async (req, res) => {
   try {
     const { partId } = req.params;
@@ -1972,6 +1985,8 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
 // ============================================================
 // SERVICE HISTORY REPORT ENDPOINTS
 // ============================================================
+
+// GET ALL SERVICE HISTORY WITH FILTERS
 app.get('/api/service-history/all', authenticateToken, async (req, res) => {
   try {
     const { startDate, endDate, equipmentName, technician, category } = req.query;
@@ -2215,6 +2230,11 @@ const startServer = async () => {
       console.log(`   PUT /api/parts/:partId/price - Update price (React frontend)`);
       console.log(`\n📥 Import API:`);
       console.log(`   POST /api/parts/import - Import parts from Excel with auto-maintenance creation`);
+      console.log(`\n🔧 Maintenance Categories:`);
+      console.log(`   Preventive - Updates next_service_date`);
+      console.log(`   Corrective - Does NOT change next_service_date`);
+      console.log(`\n🛠️ Fix Endpoint:`);
+      console.log(`   POST /api/fix-categories - Fix NULL categories (Admin only)`);
       console.log(`\n🧪 Test Route:`);
       console.log(`   GET /api/test - Check if server is running`);
     });
