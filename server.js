@@ -1157,6 +1157,81 @@ app.get('/api/maintenance/all', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
+// 🐛 DEBUG: Check service_history table
+// ============================================================
+app.get('/api/debug/service-history', authenticateToken, async (req, res) => {
+  try {
+    console.log('🐛 Debugging service_history...');
+    
+    // Check if table exists
+    const tableCheck = await db.execute(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='service_history'
+    `);
+    
+    const result = {
+      table_exists: tableCheck.rows.length > 0,
+      records: [],
+      count: 0
+    };
+    
+    if (tableCheck.rows.length > 0) {
+      // Get all records
+      const records = await db.execute(`
+        SELECT * FROM service_history ORDER BY id DESC LIMIT 20
+      `);
+      result.records = records.rows;
+      result.count = records.rows.length;
+      console.log(`✅ Found ${records.rows.length} records in service_history`);
+    } else {
+      console.log('⚠️ service_history table does not exist');
+    }
+    
+    res.json(result);
+  } catch (err) {
+    console.error('Error debugging service_history:', err.message);
+    res.json({ error: err.message });
+  }
+});
+
+// ============================================================
+// 🐛 DEBUG: Check raw service records for a specific equipment
+// ============================================================
+app.get('/api/debug/raw-history/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🐛 Debugging raw history for equipment ID: ${id}`);
+    
+    // Check gse_maintenance record
+    const maintenance = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+    
+    // Check service_history records
+    const history = await db.execute({
+      sql: 'SELECT * FROM service_history WHERE maintenance_id = ? ORDER BY id DESC',
+      args: [id]
+    });
+    
+    // Check if columns exist in service_history
+    const columns = await db.execute(`PRAGMA table_info(service_history)`);
+    
+    const result = {
+      maintenance: maintenance.rows[0] || null,
+      history: history.rows || [],
+      history_count: history.rows.length,
+      table_columns: columns.rows.map(c => c.name)
+    };
+    
+    console.log(`✅ Found ${history.rows.length} history records for equipment ${id}`);
+    res.json(result);
+  } catch (err) {
+    console.error('Error in raw history debug:', err.message);
+    res.json({ error: err.message });
+  }
+});
+
+// ============================================================
 // UTILITY FUNCTIONS
 // ============================================================
 const calculateNextServiceDate = (lastServiceDate, intervalMonths) => {
@@ -1889,7 +1964,7 @@ app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) =>
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   console.log('\n=== 🔧 RECORDING SERVICE ===');
   console.log('Maintenance ID:', req.params.id);
-  console.log('Request body:', req.body);
+  console.log('Request body:', JSON.stringify(req.body, null, 2));
 
   const { id } = req.params;
   const {
@@ -1940,6 +2015,12 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     // 1. INSERT INTO service_history FIRST
     // ============================================================
     console.log('📝 Inserting into service_history...');
+    console.log('Equipment ID:', id);
+    console.log('Equipment Name:', equipment.equipment_name);
+    console.log('Service Date:', serviceDate);
+    console.log('Service Performed:', service_performed);
+    console.log('Technician:', technician_name);
+    console.log('Category:', maintenance_category);
     
     // Ensure service_history table exists
     await db.execute(`
@@ -1965,46 +2046,51 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         FOREIGN KEY (maintenance_id) REFERENCES gse_maintenance(id)
       )
     `);
+    console.log('✅ service_history table verified');
 
     // Insert into service_history
-    await db.execute({
-      sql: `
-        INSERT INTO service_history (
-          maintenance_id,
-          equipment_name,
-          equipment_type,
-          maintenance_type,
-          service_date,
-          service_performed,
-          technician_name,
-          notes,
-          maintenance_category,
-          current_hours,
-          target_hours,
-          service_interval_months,
-          service_interval_years,
-          recorded_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        parseInt(id),
-        equipment.equipment_name,
-        equipment.equipment_type,
-        equipment.maintenance_type,
-        serviceDate,
-        service_performed || '',
-        technician_name || '',
-        notes || '',
-        maintenance_category || 'preventive',
-        sanitizedCurrentHours,
-        sanitizedTargetHours,
-        sanitizedMonthsInterval > 0 ? sanitizedMonthsInterval : sanitizedServiceIntervalMonths,
-        sanitizedServiceIntervalYears,
-        req.user.username
-      ]
-    });
-
-    console.log('✅ Inserted into service_history');
+    try {
+      const insertResult = await db.execute({
+        sql: `
+          INSERT INTO service_history (
+            maintenance_id,
+            equipment_name,
+            equipment_type,
+            maintenance_type,
+            service_date,
+            service_performed,
+            technician_name,
+            notes,
+            maintenance_category,
+            current_hours,
+            target_hours,
+            service_interval_months,
+            service_interval_years,
+            recorded_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        args: [
+          parseInt(id),
+          equipment.equipment_name,
+          equipment.equipment_type,
+          equipment.maintenance_type,
+          serviceDate,
+          service_performed || '',
+          technician_name || '',
+          notes || '',
+          maintenance_category || 'preventive',
+          sanitizedCurrentHours,
+          sanitizedTargetHours,
+          sanitizedMonthsInterval > 0 ? sanitizedMonthsInterval : sanitizedServiceIntervalMonths,
+          sanitizedServiceIntervalYears,
+          req.user.username
+        ]
+      });
+      console.log('✅ Inserted into service_history, result:', insertResult);
+    } catch (insertErr) {
+      console.error('❌ Error inserting into service_history:', insertErr.message);
+      console.error('Stack:', insertErr.stack);
+    }
 
     // ============================================================
     // 2. UPDATE gse_maintenance
@@ -2174,12 +2260,20 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     // ============================================================
     // 3. VERIFY - Check if record was saved
     // ============================================================
-    const verifyResult = await db.execute({
-      sql: 'SELECT * FROM service_history WHERE maintenance_id = ? ORDER BY id DESC LIMIT 1',
-      args: [parseInt(id)]
-    });
-
-    console.log('✅ Verification - Latest record:', verifyResult.rows[0] ? 'FOUND' : 'NOT FOUND');
+    try {
+      const verifyResult = await db.execute({
+        sql: 'SELECT * FROM service_history WHERE maintenance_id = ? ORDER BY id DESC LIMIT 5',
+        args: [parseInt(id)]
+      });
+      console.log(`✅ Verification - Found ${verifyResult.rows.length} records in service_history`);
+      if (verifyResult.rows.length > 0) {
+        console.log('✅ Latest record:', JSON.stringify(verifyResult.rows[0], null, 2));
+      } else {
+        console.log('⚠️ No records found in service_history for maintenance_id:', id);
+      }
+    } catch (verifyErr) {
+      console.error('❌ Error verifying:', verifyErr.message);
+    }
 
     const categoryText = isPreventive ? 'Preventive' : 'Corrective';
     const scheduleMsg = isPreventive && nextServiceDate ? ` (Next service: ${nextServiceDate})` : '';
@@ -2188,7 +2282,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       success: true,
       message: `✅ ${categoryText} service recorded successfully!${scheduleMsg}`,
       data: {
-        service_id: verifyResult.rows[0]?.id || null,
         service_date: serviceDate,
         next_service_date: nextServiceDate
       }
@@ -2418,25 +2511,6 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
       });
       history = historyResult.rows || [];
       console.log(`✅ Found ${history.length} history records`);
-      
-      // If no history, check if we need to populate with a default record
-      if (history.length === 0 && equipment.last_service_date) {
-        history.push({
-          id: 0,
-          service_date: equipment.last_service_date,
-          service_performed: 'Initial setup / Last recorded service',
-          technician_name: 'System',
-          notes: `Initial service record from equipment setup at ${equipment.created_at || 'unknown date'}`,
-          category: 'initial',
-          hours_at_service: equipment.current_hours || 0,
-          target_hours: equipment.target_hours || 0,
-          interval_months: equipment.service_interval_months || 0,
-          next_service_due: equipment.next_service_date || null,
-          recorded_by: 'system',
-          created_at: equipment.created_at || null
-        });
-        console.log('📝 Added virtual initial service record');
-      }
     } catch (err) {
       console.log('⚠️ Error fetching history:', err.message);
       history = [];
@@ -2721,6 +2795,9 @@ const startServer = async () => {
       console.log(`   GET /api/maintenance/all - Get all maintenance for dropdown`);
       console.log(`\n🛠️ Service Recording:`);
       console.log(`   POST /api/gse-maintenance/:id/service - Record service (saves to service_history)`);
+      console.log(`\n🐛 Debug Routes:`);
+      console.log(`   GET /api/debug/service-history - Check service_history table`);
+      console.log(`   GET /api/debug/raw-history/:id - Check raw history for equipment`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
