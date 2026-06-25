@@ -37,14 +37,29 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
   const handleReceive = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
+    setMessage('');
     
     try {
+      // Validate
+      if (!formData.part_number) {
+        setError('Part number is required');
+        setLoading(false);
+        return;
+      }
+
+      if (!formData.quantity || parseInt(formData.quantity) <= 0) {
+        setError('Valid quantity is required');
+        setLoading(false);
+        return;
+      }
+
       // Prepare the receive payload
       const receivePayload = {
         part_number: formData.part_number,
         quantity: parseInt(formData.quantity),
-        reference_number: formData.reference_number,
-        notes: formData.notes
+        reference_number: formData.reference_number || '',
+        notes: formData.notes || ''
       };
       
       // If update_price is checked, include the unit price
@@ -52,9 +67,16 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
         receivePayload.unit_price = parseFloat(formData.unit_price);
       }
       
-      await axios.post(`${API_URL}/api/transactions/receive`, receivePayload, {
-        headers: { Authorization: `Bearer ${token}` }
+      console.log('📥 Sending receive request:', receivePayload);
+      
+      const response = await axios.post(`${API_URL}/api/receive`, receivePayload, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
+      
+      console.log('✅ Receive response:', response.data);
       
       const priceMsg = formData.update_price && formData.unit_price 
         ? ` with price updated to $${parseFloat(formData.unit_price).toFixed(2)}` 
@@ -77,7 +99,10 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
       setTimeout(() => setMessage(''), 3000);
       
     } catch (err) {
-      if (err.response?.data?.error === 'Part not found') {
+      console.error('❌ Receive error:', err);
+      console.error('Error response:', err.response?.data);
+      
+      if (err.response?.status === 404 || err.response?.data?.error === 'Part not found') {
         setShowNewPartForm(true);
         setNewPartData(prev => ({ 
           ...prev, 
@@ -86,7 +111,7 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
         }));
         setError(`Part "${formData.part_number}" not found. Please add its details below.`);
       } else {
-        setError(err.response?.data?.error || 'Error receiving parts');
+        setError(err.response?.data?.error || err.response?.data?.details || 'Error receiving parts');
       }
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -97,51 +122,75 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
   const handleCreateAndReceive = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
+    setMessage('');
     
     try {
+      // Validate
+      if (!newPartData.description) {
+        setError('Description is required for new part');
+        setLoading(false);
+        return;
+      }
+
       // First create the part with maintenance type and price
-      await axios.post(`${API_URL}/api/parts`, {
+      const createPayload = {
         part_number: newPartData.part_number,
         description: newPartData.description,
-        manufacturer: newPartData.manufacturer,
-        compatible_gse: newPartData.compatible_gse,
-        location_bin: newPartData.location_bin,
-        min_stock: newPartData.min_stock,
+        manufacturer: newPartData.manufacturer || '',
+        compatible_gse: newPartData.compatible_gse || '',
+        location_bin: newPartData.location_bin || '',
+        min_stock: parseInt(newPartData.min_stock) || 5,
         unit_price: parseFloat(newPartData.unit_price) || 0,
         current_price: parseFloat(newPartData.unit_price) || 0,
         maintenance_type: newPartData.maintenance_type,
-        service_interval_hours: newPartData.service_interval_hours,
-        service_interval_months: newPartData.service_interval_months,
-        service_interval_years: newPartData.service_interval_years,
-        contact_person: newPartData.contact_person,
-        contact_phone: newPartData.contact_phone,
-        contact_email: newPartData.contact_email
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
+        service_interval_hours: parseInt(newPartData.service_interval_hours) || 0,
+        service_interval_months: parseInt(newPartData.service_interval_months) || 0,
+        service_interval_years: parseInt(newPartData.service_interval_years) || 0,
+        contact_person: newPartData.contact_person || '',
+        contact_phone: newPartData.contact_phone || '',
+        contact_email: newPartData.contact_email || ''
+      };
+
+      console.log('📦 Creating part:', createPayload);
+
+      const createResponse = await axios.post(`${API_URL}/api/parts`, createPayload, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
+
+      console.log('✅ Part created:', createResponse.data);
 
       // Prepare receive payload with price if provided
       const receivePayload = {
         part_number: newPartData.part_number,
-        quantity: parseInt(formData.quantity),
-        reference_number: formData.reference_number,
-        notes: formData.notes
+        quantity: parseInt(formData.quantity) || 1,
+        reference_number: formData.reference_number || '',
+        notes: formData.notes || 'Initial receive'
       };
       
       if (newPartData.unit_price && parseFloat(newPartData.unit_price) > 0) {
         receivePayload.unit_price = parseFloat(newPartData.unit_price);
       }
 
-      // Then receive the quantity
-      await axios.post(`${API_URL}/api/transactions/receive`, receivePayload, {
-        headers: { Authorization: `Bearer ${token}` }
+      console.log('📥 Receiving new part:', receivePayload);
+
+      const receiveResponse = await axios.post(`${API_URL}/api/receive`, receivePayload, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
+
+      console.log('✅ Receive response:', receiveResponse.data);
 
       const priceMsg = newPartData.unit_price && parseFloat(newPartData.unit_price) > 0
         ? ` with price $${parseFloat(newPartData.unit_price).toFixed(2)}`
         : '';
 
-      setMessage(`✓ Part "${newPartData.part_number}" created and ${formData.quantity} units received successfully${priceMsg}!`);
+      setMessage(`✓ Part "${newPartData.part_number}" created and ${receivePayload.quantity} units received successfully${priceMsg}!`);
       setShowNewPartForm(false);
       setFormData({ 
         part_number: '', 
@@ -175,8 +224,9 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
       setTimeout(() => setMessage(''), 4000);
       
     } catch (err) {
-      console.error('Error creating part:', err);
-      setError('Error creating part. Please try again.');
+      console.error('❌ Error creating/receiving part:', err);
+      console.error('Error response:', err.response?.data);
+      setError(err.response?.data?.error || err.response?.data?.details || 'Error creating part. Please try again.');
       setTimeout(() => setError(''), 5000);
     } finally {
       setLoading(false);
@@ -235,9 +285,7 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
               />
             </div>
 
-            {/* ============================================================
-                NEW: PRICE UPDATE SECTION
-                ============================================================ */}
+            {/* PRICE UPDATE SECTION */}
             <div style={{
               marginBottom: '15px',
               padding: '15px',
@@ -450,9 +498,7 @@ const ReceivePart = ({ token, onReceiveComplete }) => {
               />
             </div>
 
-            {/* ============================================================
-                NEW: PRICE FIELD IN NEW PART FORM
-                ============================================================ */}
+            {/* PRICE FIELD IN NEW PART FORM */}
             <div style={{ marginBottom: '15px' }}>
               <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
                 Unit Price ($)
