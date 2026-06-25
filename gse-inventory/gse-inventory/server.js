@@ -269,6 +269,301 @@ app.put('/api/parts/:partId/price', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
+// ⭐ IMPORT PARTS FROM EXCEL WITH AUTO-MAINTENANCE CREATION
+// ============================================================
+app.post('/api/parts/import', authenticateToken, async (req, res) => {
+  console.log('\n=== 📥 IMPORTING PARTS FROM EXCEL ===');
+  console.log('User:', req.user.username);
+  
+  try {
+    const { parts } = req.body;
+    
+    if (!parts || !Array.isArray(parts) || parts.length === 0) {
+      return res.status(400).json({ error: 'No parts data provided' });
+    }
+    
+    console.log(`📊 Received ${parts.length} parts to import`);
+    
+    const results = {
+      imported: [],
+      errors: [],
+      maintenanceCreated: [],
+      skipped: []
+    };
+    
+    for (const [index, partData] of parts.entries()) {
+      try {
+        // Extract part data with defaults
+        const {
+          part_number,
+          description,
+          manufacturer,
+          compatible_gse,
+          location_bin,
+          quantity_on_hand = 0,
+          min_stock = 0,
+          max_stock = 100,
+          unit_price = 0,
+          current_price = 0,
+          maintenance_type = 'none',
+          service_interval_hours = 0,
+          service_interval_months = 0,
+          service_interval_years = 0,
+          contact_person = '',
+          contact_phone = '',
+          contact_email = ''
+        } = partData;
+        
+        // Validate required fields
+        if (!part_number) {
+          results.errors.push({ row: index + 1, error: 'Missing part_number' });
+          continue;
+        }
+        
+        // Check if part already exists
+        const existingPart = await db.execute({
+          sql: 'SELECT id, part_number FROM parts WHERE part_number = ?',
+          args: [part_number]
+        });
+        
+        let partId;
+        let isNew = false;
+        
+        if (existingPart.rows.length > 0) {
+          // Update existing part
+          partId = existingPart.rows[0].id;
+          await db.execute({
+            sql: `
+              UPDATE parts SET
+                description = ?,
+                manufacturer = ?,
+                compatible_gse = ?,
+                location_bin = ?,
+                quantity_on_hand = ?,
+                min_stock = ?,
+                max_stock = ?,
+                unit_price = ?,
+                current_price = ?,
+                maintenance_type = ?,
+                service_interval_hours = ?,
+                service_interval_months = ?,
+                service_interval_years = ?,
+                contact_person = ?,
+                contact_phone = ?,
+                contact_email = ?,
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `,
+            args: [
+              description || '',
+              manufacturer || '',
+              compatible_gse || '',
+              location_bin || '',
+              quantity_on_hand,
+              min_stock,
+              max_stock,
+              unit_price,
+              current_price,
+              maintenance_type,
+              service_interval_hours,
+              service_interval_months,
+              service_interval_years,
+              contact_person || '',
+              contact_phone || '',
+              contact_email || '',
+              partId
+            ]
+          });
+          results.skipped.push({ part_number, reason: 'Updated existing part' });
+        } else {
+          // Insert new part
+          isNew = true;
+          const insertResult = await db.execute({
+            sql: `
+              INSERT INTO parts (
+                part_number, description, manufacturer, compatible_gse,
+                location_bin, quantity_on_hand, min_stock, max_stock,
+                unit_price, current_price, maintenance_type,
+                service_interval_hours, service_interval_months, service_interval_years,
+                contact_person, contact_phone, contact_email,
+                created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              RETURNING id
+            `,
+            args: [
+              part_number,
+              description || '',
+              manufacturer || '',
+              compatible_gse || '',
+              location_bin || '',
+              quantity_on_hand,
+              min_stock,
+              max_stock,
+              unit_price,
+              current_price,
+              maintenance_type,
+              service_interval_hours,
+              service_interval_months,
+              service_interval_years,
+              contact_person || '',
+              contact_phone || '',
+              contact_email || ''
+            ]
+          });
+          
+          partId = insertResult.rows[0].id;
+          results.imported.push({ part_number, description });
+        }
+        
+        // ============================================================
+        // ⭐ AUTO-CREATE MAINTENANCE RECORD
+        // ============================================================
+        if (maintenance_type && maintenance_type !== 'none') {
+          // Check if maintenance record already exists for this part
+          const existingMaintenance = await db.execute({
+            sql: 'SELECT id FROM gse_maintenance WHERE part_id = ?',
+            args: [partId]
+          });
+          
+          if (existingMaintenance.rows.length === 0) {
+            // Create maintenance record
+            const equipmentName = description || part_number;
+            
+            // Calculate next service dates based on maintenance type
+            let nextServiceDate = null;
+            let nextServiceYear = null;
+            
+            if (maintenance_type === 'month' && service_interval_months > 0) {
+              const today = new Date();
+              nextServiceDate = new Date(today);
+              nextServiceDate.setMonth(nextServiceDate.getMonth() + parseInt(service_interval_months));
+              nextServiceDate = nextServiceDate.toISOString().split('T')[0];
+            } else if (maintenance_type === 'year' && service_interval_years > 0) {
+              const today = new Date();
+              nextServiceYear = today.getFullYear() + parseInt(service_interval_years);
+            }
+            
+            // Insert maintenance record
+            await db.execute({
+              sql: `
+                INSERT INTO gse_maintenance (
+                  equipment_name, equipment_type, part_id, maintenance_type,
+                  service_performed, technician_name, notes,
+                  last_service_date, last_service_hours, last_service_year,
+                  last_service_full_date,
+                  service_interval_hours, service_interval_months,
+                  service_interval_years, service_interval_months_for_hour,
+                  current_hours, target_hours,
+                  next_service_date, next_service_year,
+                  status, maintenance_category, created_by,
+                  created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              `,
+              args: [
+                equipmentName,
+                manufacturer || 'GSE Equipment',
+                partId,
+                maintenance_type,
+                'Initial setup from import',
+                req.user.username,
+                `Auto-created from Excel import on ${new Date().toISOString()}`,
+                null, // last_service_date
+                0, // last_service_hours
+                null, // last_service_year
+                null, // last_service_full_date
+                service_interval_hours || 0,
+                service_interval_months || 0,
+                service_interval_years || 0,
+                0, // service_interval_months_for_hour
+                0, // current_hours
+                service_interval_hours || 0, // target_hours
+                nextServiceDate,
+                nextServiceYear,
+                'serviced',
+                'preventive',
+                req.user.username
+              ]
+            });
+            
+            results.maintenanceCreated.push({
+              part_number,
+              equipment_name: equipmentName,
+              maintenance_type: maintenance_type,
+              interval: maintenance_type === 'month' ? `${service_interval_months} months` :
+                        maintenance_type === 'year' ? `${service_interval_years} years` :
+                        maintenance_type === 'hour' ? `${service_interval_hours} hours` : 'N/A'
+            });
+            
+            console.log(`✅ Auto-created maintenance for ${part_number}`);
+          } else {
+            // Update existing maintenance with new intervals
+            await db.execute({
+              sql: `
+                UPDATE gse_maintenance SET
+                  service_interval_hours = ?,
+                  service_interval_months = ?,
+                  service_interval_years = ?,
+                  maintenance_type = ?,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE part_id = ?
+              `,
+              args: [
+                service_interval_hours || 0,
+                service_interval_months || 0,
+                service_interval_years || 0,
+                maintenance_type,
+                partId
+              ]
+            });
+            
+            results.maintenanceCreated.push({
+              part_number,
+              equipment_name: description || part_number,
+              maintenance_type: 'Updated existing maintenance',
+              interval: 'Updated intervals'
+            });
+          }
+        }
+        
+      } catch (rowError) {
+        console.error(`❌ Error importing row ${index + 1}:`, rowError.message);
+        results.errors.push({
+          row: index + 1,
+          error: rowError.message,
+          data: partData
+        });
+      }
+    }
+    
+    console.log(`✅ Import complete: ${results.imported.length} new, ${results.maintenanceCreated.length} maintenance records created`);
+    
+    res.json({
+      success: true,
+      message: `Imported ${parts.length} parts successfully`,
+      results: {
+        imported: results.imported.length,
+        maintenanceCreated: results.maintenanceCreated.length,
+        skipped: results.skipped.length,
+        errors: results.errors.length
+      },
+      details: {
+        imported: results.imported,
+        maintenanceCreated: results.maintenanceCreated,
+        skipped: results.skipped,
+        errors: results.errors
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Import error:', error);
+    res.status(500).json({
+      error: 'Failed to import parts',
+      details: error.message
+    });
+  }
+});
+
+// ============================================================
 // TEST ROUTE - To verify server is running
 // ============================================================
 app.get('/api/test', (req, res) => {
@@ -280,7 +575,8 @@ app.get('/api/test', (req, res) => {
       fullPriceHistory: '/api/price-history/full/:partId',
       latestPrice: '/api/price-history/latest/:partId',
       addPrice: '/api/price-history (POST)',
-      updatePrice: '/api/parts/:partId/price (PUT)'
+      updatePrice: '/api/parts/:partId/price (PUT)',
+      importParts: '/api/parts/import (POST)'
     }
   });
 });
@@ -574,12 +870,12 @@ const createSampleData = async () => {
     }
 
     const parts = [
-      ['P001', 'Air Filter', 'Donaldson', 'Boeing 737', 'C-03', 25, 5, 28.90, 'Filter maintenance', 3, 1],
-      ['P002', 'Hydraulic Fluid', 'Shell', 'Airbus A320', 'D-01', 100, 20, 8.50, 'Fluid maintenance', 3, 1],
-      ['P003', 'Battery', 'Exide', 'Boeing 737', 'E-01', 2, 5, 10.99, 'Battery maintenance', 6, 1],
-      ['P004', 'Fire Extinguisher', 'Amerex', 'All GSE', 'F-01', 8, 2, 89.99, 'Safety maintenance', 12, 1],
-      ['P005', 'Load Cell', 'Interface', 'Test Equipment', 'G-01', 5, 1, 225.00, 'Calibration', 6, 1],
-      ['P006', 'Hand Tools Set', 'Stanley', 'Hand Tools', 'H-01', 20, 5, 34.50, 'none', 0, 0],
+      ['P001', 'Air Filter', 'Donaldson', 'Boeing 737', 'C-03', 25, 5, 28.90, 'month', 0, 3, 0],
+      ['P002', 'Hydraulic Fluid', 'Shell', 'Airbus A320', 'D-01', 100, 20, 8.50, 'month', 0, 3, 0],
+      ['P003', 'Battery', 'Exide', 'Boeing 737', 'E-01', 2, 5, 10.99, 'year', 0, 0, 1],
+      ['P004', 'Fire Extinguisher', 'Amerex', 'All GSE', 'F-01', 8, 2, 89.99, 'year', 0, 0, 1],
+      ['P005', 'Load Cell', 'Interface', 'Test Equipment', 'G-01', 5, 1, 225.00, 'month', 0, 6, 0],
+      ['P006', 'Hand Tools Set', 'Stanley', 'Hand Tools', 'H-01', 20, 5, 34.50, 'none', 0, 0, 0],
     ];
 
     for (const part of parts) {
@@ -587,9 +883,10 @@ const createSampleData = async () => {
         sql: `INSERT INTO parts (
           part_number, description, manufacturer, compatible_gse, 
           location_bin, quantity_on_hand, min_stock, 
-          unit_price, maintenance_type, service_interval_months, 
-          service_interval_years, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          unit_price, maintenance_type, service_interval_hours,
+          service_interval_months, service_interval_years,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         args: part
       });
       console.log(`✅ Added ${part[0]} - ${part[1]}`);
@@ -1722,6 +2019,8 @@ const startServer = async () => {
       console.log(`   GET /api/price-history/latest/:partId - Get latest price`);
       console.log(`   POST /api/price-history - Add price record and update current price`);
       console.log(`   PUT /api/parts/:partId/price - Update price (React frontend)`);
+      console.log(`\n📥 Import API:`);
+      console.log(`   POST /api/parts/import - Import parts from Excel with auto-maintenance creation`);
       console.log(`\n🔧 Maintenance Categories:`);
       console.log(`   Preventive - Updates next_service_date`);
       console.log(`   Corrective - Does NOT change next_service_date`);
