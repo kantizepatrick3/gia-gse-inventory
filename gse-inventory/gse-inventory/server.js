@@ -1191,6 +1191,66 @@ app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res
 });
 
 // ============================================================
+// MAINTENANCE HISTORY ENDPOINT - GET HISTORY FOR SPECIFIC EQUIPMENT
+// ============================================================
+app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit } = req.query;
+    
+    // Get equipment details
+    const equipmentResult = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+    
+    if (equipmentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipment not found' });
+    }
+    
+    const equipment = equipmentResult.rows[0];
+    
+    // Get history from service_history table with category
+    const historyResult = await db.execute({
+      sql: `
+        SELECT 
+          service_date,
+          service_performed,
+          technician_name as technician,
+          current_hours as hours_at_service,
+          service_interval_months as interval_months,
+          notes,
+          next_service_date as next_service_due,
+          maintenance_category as category,
+          created_at
+        FROM service_history
+        WHERE maintenance_id = ?
+        ORDER BY service_date DESC
+        ${limit ? `LIMIT ${parseInt(limit)}` : ''}
+      `,
+      args: [id]
+    });
+    
+    res.json({
+      equipment: {
+        id: equipment.id,
+        name: equipment.equipment_name,
+        type: equipment.equipment_type,
+        status: equipment.status,
+        last_service_date: equipment.last_service_date,
+        next_service_date: equipment.next_service_date,
+        current_hours: equipment.current_hours,
+        target_hours: equipment.target_hours
+      },
+      history: historyResult.rows
+    });
+  } catch (err) {
+    console.error('Error fetching maintenance history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // SERVICE HISTORY REPORT ENDPOINTS
 // ============================================================
 
@@ -1406,6 +1466,8 @@ const startServer = async () => {
       console.log(`   GET /api/service-history/all - All history with filters`);
       console.log(`   GET /api/service-history/equipment/:id - By equipment`);
       console.log(`   GET /api/service-history/stats - Statistics`);
+      console.log(`\n📋 Maintenance History API:`);
+      console.log(`   GET /api/gse-maintenance/:id/history - Get history for equipment`);
       console.log(`\n🔧 Maintenance Categories:`);
       console.log(`   Preventive - Updates next_service_date`);
       console.log(`   Corrective - Does NOT change next_service_date`);
