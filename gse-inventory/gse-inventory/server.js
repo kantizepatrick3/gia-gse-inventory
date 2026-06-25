@@ -1221,7 +1221,7 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
           service_interval_months as interval_months,
           notes,
           next_service_date as next_service_due,
-          maintenance_category as category,
+          COALESCE(maintenance_category, 'preventive') as category,
           created_at
         FROM service_history
         WHERE maintenance_id = ?
