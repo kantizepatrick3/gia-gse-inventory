@@ -9,6 +9,8 @@ const PartsList = ({ token, user }) => {
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingPart, setEditingPart] = useState(null);
   const [selectedPart, setSelectedPart] = useState(null);
+  const [pricePart, setPricePart] = useState(null); // Separate state for price modal
+  const [historyPart, setHistoryPart] = useState(null); // Separate state for history modal
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [priceData, setPriceData] = useState({
     price: '',
@@ -34,7 +36,11 @@ const PartsList = ({ token, user }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   const [importing, setImporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [updatingPrice, setUpdatingPrice] = useState(false);
 
+  // ============================================================
+  // FETCH PARTS
+  // ============================================================
   const fetchParts = useCallback(async () => {
     try {
       console.log('🔧 Fetching parts from:', `${API_URL}/api/parts`);
@@ -51,6 +57,7 @@ const PartsList = ({ token, user }) => {
       console.error('🔧 Error fetching parts:', err);
       console.error('🔧 Error response:', err.response?.data);
       setError('Failed to load parts');
+      setTimeout(() => setError(''), 3000);
     }
   }, [token]);
 
@@ -58,6 +65,9 @@ const PartsList = ({ token, user }) => {
     fetchParts();
   }, [fetchParts]);
 
+  // ============================================================
+  // ADD PART
+  // ============================================================
   const handleAddPart = async (e) => {
     e.preventDefault();
     try {
@@ -80,11 +90,14 @@ const PartsList = ({ token, user }) => {
       await fetchParts();
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
-      setError('Error adding part');
+      setError('Error adding part: ' + (err.response?.data?.error || err.message));
       setTimeout(() => setError(''), 3000);
     }
   };
 
+  // ============================================================
+  // EDIT PART
+  // ============================================================
   const handleEditPart = async (e) => {
     e.preventDefault();
     try {
@@ -103,21 +116,22 @@ const PartsList = ({ token, user }) => {
       await fetchParts();
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
-      setError('Error updating part');
+      setError('Error updating part: ' + (err.response?.data?.error || err.message));
       setTimeout(() => setError(''), 3000);
     }
   };
 
+  // ============================================================
+  // DELETE PART
+  // ============================================================
   const handleDeletePart = async (part) => {
     try {
       console.log('🗑️ Deleting part:', part);
-      const response = await axios.delete(`${API_URL}/api/parts/${part.id}`, {
+      await axios.delete(`${API_URL}/api/parts/${part.id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('Delete response:', response.data);
       setMessage(`✓ Part "${part.part_number}" deleted successfully!`);
       setShowDeleteConfirm(null);
-      setParts([]);
       await fetchParts();
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
@@ -132,38 +146,61 @@ const PartsList = ({ token, user }) => {
   // PRICE HISTORY FUNCTIONS
   // ============================================================
   
-  const fetchPriceHistory = async (partId) => {
+  const fetchPriceHistory = async (partId, part) => {
     try {
+      setHistoryPart(part);
+      console.log('📊 Fetching price history for part:', partId);
       const response = await axios.get(`${API_URL}/api/price-history/${partId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      console.log('📊 Price history loaded:', response.data.length);
       setPriceHistory(response.data || []);
       setShowPriceHistory(true);
     } catch (err) {
       console.error('Error fetching price history:', err);
-      setError('Failed to load price history');
-      setTimeout(() => setError(''), 3000);
+      if (err.response?.status === 404) {
+        setPriceHistory([]);
+        setShowPriceHistory(true);
+      } else {
+        setError('Failed to load price history: ' + (err.response?.data?.error || err.message));
+        setTimeout(() => setError(''), 3000);
+      }
     }
   };
 
   const handleUpdatePrice = async (e) => {
     e.preventDefault();
+    setUpdatingPrice(true);
+    
     try {
+      // Validate price
+      const priceValue = parseFloat(priceData.price);
+      if (isNaN(priceValue) || priceValue < 0) {
+        throw new Error('Please enter a valid price');
+      }
+      
       const payload = {
-        part_id: selectedPart.id,
-        price: parseFloat(priceData.price),
+        part_id: pricePart.id,
+        price: priceValue,
         quantity: parseInt(priceData.quantity) || 1,
         transaction_type: priceData.transaction_type || 'MANUAL',
         notes: priceData.notes || ''
       };
 
-      await axios.post(`${API_URL}/api/price-history`, payload, {
-        headers: { Authorization: `Bearer ${token}` }
+      console.log('💰 Updating price with payload:', payload);
+      
+      const response = await axios.post(`${API_URL}/api/price-history`, payload, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      setMessage(`✓ Price updated for ${selectedPart.part_number}!`);
+      console.log('💰 Price update response:', response.data);
+      
+      setMessage(`✓ Price updated for ${pricePart.part_number} successfully!`);
       setShowPriceModal(false);
-      setSelectedPart(null);
+      setPricePart(null);
       setPriceData({
         price: '',
         quantity: 1,
@@ -174,13 +211,17 @@ const PartsList = ({ token, user }) => {
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       console.error('Error updating price:', err);
-      setError(err.response?.data?.error || 'Failed to update price');
+      console.error('Error response:', err.response?.data);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to update price';
+      setError('Failed to update price: ' + errorMsg);
       setTimeout(() => setError(''), 3000);
+    } finally {
+      setUpdatingPrice(false);
     }
   };
 
   const openPriceModal = (part) => {
-    setSelectedPart(part);
+    setPricePart(part);
     setPriceData({
       price: part.current_price || part.unit_price || 0,
       quantity: 1,
@@ -196,13 +237,17 @@ const PartsList = ({ token, user }) => {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return 'Invalid Date';
+    }
   };
 
   const handleManualRefresh = async () => {
@@ -223,50 +268,58 @@ const PartsList = ({ token, user }) => {
       const reader = new FileReader();
       
       reader.onload = async (e) => {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-        
-        console.log('📊 Excel data:', jsonData.length, 'rows');
-        
-        let successCount = 0;
-        let failCount = 0;
-        
-        for (const row of jsonData) {
-          const partData = {
-            part_number: row['Part Number'] || row['PartNumber'] || row['part_number'],
-            description: row['Description'] || row['description'] || '',
-            manufacturer: row['Manufacturer'] || row['manufacturer'] || '',
-            compatible_gse: row['Compatible GSE'] || row['compatible_gse'] || '',
-            location_bin: row['Location Bin'] || row['location_bin'] || '',
-            min_stock: parseInt(row['Min Stock'] || row['min_stock'] || 5),
-            quantity_on_hand: parseInt(row['Quantity On Hand'] || row['quantity_on_hand'] || 0),
-            contact_person: row['Contact Person'] || row['contact_person'] || '',
-            contact_phone: row['Contact Phone'] || row['contact_phone'] || '',
-            contact_email: row['Contact Email'] || row['contact_email'] || '',
-          };
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet);
           
-          if (!partData.part_number) {
-            failCount++;
-            continue;
+          console.log('📊 Excel data:', jsonData.length, 'rows');
+          
+          let successCount = 0;
+          let failCount = 0;
+          
+          for (const row of jsonData) {
+            const partData = {
+              part_number: row['Part Number'] || row['PartNumber'] || row['part_number'],
+              description: row['Description'] || row['description'] || '',
+              manufacturer: row['Manufacturer'] || row['manufacturer'] || '',
+              compatible_gse: row['Compatible GSE'] || row['compatible_gse'] || '',
+              location_bin: row['Location Bin'] || row['location_bin'] || '',
+              min_stock: parseInt(row['Min Stock'] || row['min_stock'] || 5),
+              quantity_on_hand: parseInt(row['Quantity On Hand'] || row['quantity_on_hand'] || 0),
+              contact_person: row['Contact Person'] || row['contact_person'] || '',
+              contact_phone: row['Contact Phone'] || row['contact_phone'] || '',
+              contact_email: row['Contact Email'] || row['contact_email'] || '',
+            };
+            
+            if (!partData.part_number) {
+              failCount++;
+              continue;
+            }
+            
+            try {
+              await axios.post(`${API_URL}/api/parts`, partData, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              successCount++;
+            } catch (err) {
+              console.error('Error importing row:', err);
+              failCount++;
+            }
           }
           
-          try {
-            await axios.post(`${API_URL}/api/parts`, partData, {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            successCount++;
-          } catch (err) {
-            failCount++;
-          }
+          setMessage(`✓ Import complete! ${successCount} parts added, ${failCount} failed.`);
+          setImporting(false);
+          await fetchParts();
+          setTimeout(() => setMessage(''), 5000);
+          event.target.value = '';
+        } catch (err) {
+          console.error('Error processing Excel:', err);
+          setError('Error processing Excel file');
+          setImporting(false);
+          setTimeout(() => setError(''), 3000);
         }
-        
-        setMessage(`✓ Import complete! ${successCount} parts added, ${failCount} failed.`);
-        setImporting(false);
-        await fetchParts();
-        setTimeout(() => setMessage(''), 5000);
-        event.target.value = '';
       };
       
       reader.onerror = () => {
@@ -299,6 +352,9 @@ const PartsList = ({ token, user }) => {
     setShowEditForm(true);
   };
 
+  // ============================================================
+  // RENDER
+  // ============================================================
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
@@ -529,7 +585,7 @@ const PartsList = ({ token, user }) => {
                     💰 Price
                   </button>
                   <button 
-                    onClick={() => fetchPriceHistory(part.id)} 
+                    onClick={() => fetchPriceHistory(part.id, part)} 
                     style={{ 
                       backgroundColor: '#9b59b6', 
                       color: 'white', 
@@ -599,7 +655,7 @@ const PartsList = ({ token, user }) => {
       )}
 
       {/* Price Update Modal */}
-      {showPriceModal && selectedPart && (
+      {showPriceModal && pricePart && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -620,8 +676,8 @@ const PartsList = ({ token, user }) => {
             width: '90%'
           }}>
             <h3>💰 Update Price</h3>
-            <p><strong>Part:</strong> {selectedPart.part_number} - {selectedPart.description}</p>
-            <p><strong>Current Price:</strong> ${parseFloat(selectedPart.current_price || selectedPart.unit_price || 0).toFixed(2)}</p>
+            <p><strong>Part:</strong> {pricePart.part_number} - {pricePart.description}</p>
+            <p><strong>Current Price:</strong> {formatPrice(pricePart.current_price || pricePart.unit_price || 0)}</p>
             <hr />
             <form onSubmit={handleUpdatePrice}>
               <div style={{ marginBottom: '15px' }}>
@@ -629,6 +685,7 @@ const PartsList = ({ token, user }) => {
                 <input
                   type="number"
                   step="0.01"
+                  min="0"
                   required
                   value={priceData.price}
                   onChange={(e) => setPriceData({ ...priceData, price: e.target.value })}
@@ -639,6 +696,7 @@ const PartsList = ({ token, user }) => {
                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Quantity</label>
                 <input
                   type="number"
+                  min="1"
                   value={priceData.quantity}
                   onChange={(e) => setPriceData({ ...priceData, quantity: parseInt(e.target.value) || 1 })}
                   style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
@@ -668,10 +726,26 @@ const PartsList = ({ token, user }) => {
                 />
               </div>
               <div style={{ display: 'flex', gap: '10px' }}>
-                <button type="submit" style={{ flex: 1, backgroundColor: '#2196f3', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}>
-                  Update Price
+                <button 
+                  type="submit" 
+                  disabled={updatingPrice}
+                  style={{ 
+                    flex: 1, 
+                    backgroundColor: updatingPrice ? '#90caf9' : '#2196f3', 
+                    color: 'white', 
+                    border: 'none', 
+                    padding: '10px 15px', 
+                    borderRadius: '5px', 
+                    cursor: updatingPrice ? 'not-allowed' : 'pointer' 
+                  }}
+                >
+                  {updatingPrice ? '⏳ Updating...' : '💰 Update Price'}
                 </button>
-                <button type="button" onClick={() => { setShowPriceModal(false); setSelectedPart(null); }} style={{ backgroundColor: '#95a5a6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}>
+                <button 
+                  type="button" 
+                  onClick={() => { setShowPriceModal(false); setPricePart(null); }} 
+                  style={{ backgroundColor: '#95a5a6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}
+                >
                   Cancel
                 </button>
               </div>
@@ -681,7 +755,7 @@ const PartsList = ({ token, user }) => {
       )}
 
       {/* Price History Modal */}
-      {showPriceHistory && (
+      {showPriceHistory && historyPart && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -704,10 +778,13 @@ const PartsList = ({ token, user }) => {
             overflowY: 'auto'
           }}>
             <h3>📊 Price History</h3>
-            <p><strong>Part:</strong> {selectedPart?.part_number} - {selectedPart?.description}</p>
+            <p><strong>Part:</strong> {historyPart.part_number} - {historyPart.description}</p>
             <hr />
             {priceHistory.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '20px', color: '#666' }}>No price history available.</p>
+              <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                <p style={{ fontSize: '48px', margin: '0' }}>📭</p>
+                <p>No price history available for this part.</p>
+              </div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -725,8 +802,8 @@ const PartsList = ({ token, user }) => {
                     <tr key={record.id || index}>
                       <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>{index + 1}</td>
                       <td style={{ border: '1px solid #ddd', padding: '8px' }}>{formatDate(record.created_at)}</td>
-                      <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
-                        ${parseFloat(record.price).toFixed(2)}
+                      <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'right', fontWeight: 'bold', color: '#1976d2' }}>
+                        {formatPrice(record.price)}
                       </td>
                       <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>{record.quantity || 1}</td>
                       <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>
@@ -752,7 +829,10 @@ const PartsList = ({ token, user }) => {
               </table>
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <button onClick={() => { setShowPriceHistory(false); setSelectedPart(null); }} style={{ backgroundColor: '#95a5a6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}>
+              <button 
+                onClick={() => { setShowPriceHistory(false); setHistoryPart(null); }} 
+                style={{ backgroundColor: '#95a5a6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}
+              >
                 Close
               </button>
             </div>
@@ -781,7 +861,7 @@ const PartsList = ({ token, user }) => {
             maxWidth: '400px',
             textAlign: 'center'
           }}>
-            <h3>Confirm Delete</h3>
+            <h3>⚠️ Confirm Delete</h3>
             <p>Are you sure you want to delete:</p>
             <p><strong>{showDeleteConfirm.part_number}</strong><br/>{showDeleteConfirm.description}</p>
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'center' }}>
