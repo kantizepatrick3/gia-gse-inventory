@@ -10,7 +10,8 @@ import Transactions from './components/Transactions';
 import Reports from './components/Reports';
 import Users from './components/Users';
 import GSEMaintenance from './components/GSEMaintenance';
-import MaintenanceHistory from './components/MaintenanceHistory'; // ← ADD THIS IMPORT
+import MaintenanceHistory from './components/MaintenanceHistory';
+import PriceHistory from './components/PriceHistory'; // ✅ ADD THIS IMPORT
 import Navbar from './components/Navbar';
 import './App.css';
 
@@ -52,10 +53,8 @@ function App() {
             <Route path="/reports" element={<Reports token={token} />} />
             <Route path="/users" element={<Users token={token} user={user} />} />
             <Route path="/maintenance" element={<GSEMaintenance token={token} user={user} />} />
-            
-            {/* ← ADD THIS NEW ROUTE */}
             <Route path="/maintenance-history" element={<MaintenanceHistory token={token} />} />
-            
+            <Route path="/price-history" element={<PriceHistory token={token} />} /> {/* ✅ ADD THIS ROUTE */}
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </div>
