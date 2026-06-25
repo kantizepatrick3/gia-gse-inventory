@@ -58,6 +58,7 @@ app.get('/api/test', (req, res) => {
       priceHistoryPost: '/api/price-history',
       receiveParts: '/api/receive-parts',
       gseMaintenance: '/api/gse-maintenance',
+      transactions: '/api/transactions',
       dashboard: '/api/requests/pending, /api/reports/low-stock'
     }
   });
@@ -562,6 +563,45 @@ app.put('/api/parts/:partId/price', authenticateToken, async (req, res) => {
       error: 'Failed to update price',
       details: error.message
     });
+  }
+});
+
+// ============================================================
+// 📊 TRANSACTIONS ROUTE - FIXED
+// ============================================================
+app.get('/api/transactions', authenticateToken, async (req, res) => {
+  try {
+    const { limit = 100, offset = 0, type, part_id } = req.query;
+    
+    let query = `
+      SELECT 
+        t.*,
+        p.part_number,
+        p.description
+      FROM transactions t
+      LEFT JOIN parts p ON t.part_id = p.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (type) {
+      query += ` AND t.transaction_type = ?`;
+      params.push(type);
+    }
+
+    if (part_id) {
+      query += ` AND t.part_id = ?`;
+      params.push(part_id);
+    }
+
+    query += ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await db.execute({ sql: query, args: params });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching transactions:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -2046,44 +2086,56 @@ app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res
 });
 
 // ============================================================
-// MAINTENANCE HISTORY ENDPOINT
+// MAINTENANCE HISTORY ENDPOINT - FIXED
 // ============================================================
 app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { limit } = req.query;
-
+    const { limit = 10 } = req.query;
+    
+    console.log(`📊 Fetching maintenance history for ID: ${id}`);
+    
+    // Check if equipment exists
     const equipmentResult = await db.execute({
       sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
       args: [id]
     });
-
+    
     if (equipmentResult.rows.length === 0) {
       return res.status(404).json({ error: 'Equipment not found' });
     }
-
+    
     const equipment = equipmentResult.rows[0];
-
-    const historyResult = await db.execute({
-      sql: `
-        SELECT
-          service_date,
-          service_performed,
-          technician_name as technician,
-          current_hours as hours_at_service,
-          service_interval_months as interval_months,
-          notes,
-          next_service_date as next_service_due,
-          COALESCE(maintenance_category, 'preventive') as category,
-          created_at
-        FROM service_history
-        WHERE maintenance_id = ?
-        ORDER BY service_date DESC
-        ${limit ? `LIMIT ${parseInt(limit)}` : ''}
-      `,
-      args: [id]
-    });
-
+    
+    // Check if service_history table exists
+    const tableCheck = await db.execute(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='service_history'
+    `);
+    
+    let historyResult = { rows: [] };
+    
+    if (tableCheck.rows.length > 0) {
+      historyResult = await db.execute({
+        sql: `
+          SELECT 
+            service_date,
+            service_performed,
+            technician_name as technician,
+            current_hours as hours_at_service,
+            service_interval_months as interval_months,
+            notes,
+            next_service_date as next_service_due,
+            COALESCE(maintenance_category, 'preventive') as category,
+            created_at
+          FROM service_history
+          WHERE maintenance_id = ?
+          ORDER BY service_date DESC
+          LIMIT ?
+        `,
+        args: [id, parseInt(limit)]
+      });
+    }
+    
     res.json({
       equipment: {
         id: equipment.id,
@@ -2095,11 +2147,16 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
         current_hours: equipment.current_hours,
         target_hours: equipment.target_hours
       },
-      history: historyResult.rows
+      history: historyResult.rows || []
     });
+    
   } catch (err) {
-    console.error('Error fetching maintenance history:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('❌ Error fetching maintenance history:', err.message);
+    console.error('Stack:', err.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch maintenance history',
+      details: err.message 
+    });
   }
 });
 
@@ -2355,6 +2412,8 @@ const startServer = async () => {
       console.log(`   GET /api/parts/count - Total parts count`);
       console.log(`   GET /api/maintenance/count - Maintenance count`);
       console.log(`   GET /api/maintenance/overdue - Overdue maintenance`);
+      console.log(`\n📋 Transactions API:`);
+      console.log(`   GET /api/transactions - Get all transactions`);
       console.log(`\n📥 Import API:`);
       console.log(`   POST /api/parts/import - Import parts from Excel`);
     });
