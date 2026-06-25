@@ -86,6 +86,73 @@ const authenticateToken = (req, res, next) => {
 };
 
 // ============================================================
+// ⭐ PRICE HISTORY ROUTES - MOVED TO TOP FOR RELIABILITY ⭐
+// ============================================================
+
+// GET PRICE HISTORY FOR A SPECIFIC PART
+app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
+  try {
+    const { partId } = req.params;
+    console.log('💰 Getting price history for part:', partId);
+    
+    // Check if price_history table exists
+    const tableCheck = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='price_history'");
+    if (tableCheck.rows.length === 0) {
+      console.log('⚠️ Price history table does not exist yet');
+      return res.json([]);
+    }
+    
+    const result = await db.execute({
+      sql: `SELECT * FROM price_history WHERE part_id = ? ORDER BY created_at DESC LIMIT 10`,
+      args: [partId]
+    });
+    
+    console.log('✅ Found', result.rows.length, 'price history records');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching price history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ADD PRICE HISTORY RECORD
+app.post('/api/price-history', authenticateToken, async (req, res) => {
+  const { part_id, price, quantity, transaction_type, notes } = req.body;
+  
+  console.log('💰 Adding price for part:', part_id, 'price:', price);
+  
+  try {
+    // Validate part exists
+    const partResult = await db.execute({
+      sql: 'SELECT * FROM parts WHERE id = ?',
+      args: [part_id]
+    });
+
+    if (partResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+    
+    // Insert price history
+    await db.execute({
+      sql: `INSERT INTO price_history (part_id, price, quantity, transaction_type, notes, recorded_by) 
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [part_id, price, quantity || 1, transaction_type || 'MANUAL', notes || '', req.user.username]
+    });
+    
+    // Update part's current price
+    await db.execute({
+      sql: `UPDATE parts SET current_price = ?, unit_price = ? WHERE id = ?`,
+      args: [price, price, part_id]
+    });
+    
+    res.json({ success: true, message: 'Price updated successfully!' });
+  } catch (err) {
+    console.error('Error adding price history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // UTILITY FUNCTIONS FOR MAINTENANCE CALCULATIONS
 // ============================================================
 const calculateNextServiceDate = (lastServiceDate, intervalMonths) => {
@@ -1392,156 +1459,6 @@ app.get('/api/service-history/stats', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// PRICE HISTORY ROUTES
-// ============================================================
-
-// GET PRICE HISTORY FOR A SPECIFIC PART
-app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
-  try {
-    const { partId } = req.params;
-    
-    const result = await db.execute({
-      sql: `
-        SELECT 
-          ph.*,
-          p.part_number,
-          p.description
-        FROM price_history ph
-        JOIN parts p ON p.id = ph.part_id
-        WHERE ph.part_id = ?
-        ORDER BY ph.created_at DESC
-        LIMIT 10
-      `,
-      args: [partId]
-    });
-    
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching price history:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET FULL PRICE HISTORY FOR A SPECIFIC PART (No limit)
-app.get('/api/price-history/full/:partId', authenticateToken, async (req, res) => {
-  try {
-    const { partId } = req.params;
-    
-    const result = await db.execute({
-      sql: `
-        SELECT 
-          ph.*,
-          p.part_number,
-          p.description,
-          p.manufacturer
-        FROM price_history ph
-        JOIN parts p ON p.id = ph.part_id
-        WHERE ph.part_id = ?
-        ORDER BY ph.created_at DESC
-      `,
-      args: [partId]
-    });
-    
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching full price history:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ADD PRICE HISTORY RECORD
-app.post('/api/price-history', authenticateToken, async (req, res) => {
-  const { part_id, price, quantity, transaction_type, reference_number, notes } = req.body;
-
-  console.log('💰 Price update request received for part:', part_id);
-
-  try {
-    // Validate part exists
-    const partResult = await db.execute({
-      sql: 'SELECT * FROM parts WHERE id = ?',
-      args: [part_id]
-    });
-
-    if (partResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-
-    // Insert price history record
-    await db.execute({
-      sql: `
-        INSERT INTO price_history (
-          part_id, 
-          price, 
-          quantity, 
-          transaction_type, 
-          reference_number, 
-          notes, 
-          recorded_by,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `,
-      args: [
-        part_id, 
-        parseFloat(price) || 0, 
-        parseInt(quantity) || 1, 
-        transaction_type || 'MANUAL', 
-        reference_number || '', 
-        notes || '', 
-        req.user.username
-      ]
-    });
-
-    // Update part's current price
-    await db.execute({
-      sql: `
-        UPDATE parts 
-        SET 
-          current_price = ?,
-          unit_price = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [parseFloat(price) || 0, parseFloat(price) || 0, part_id]
-    });
-
-    res.json({
-      success: true,
-      message: 'Price updated successfully'
-    });
-  } catch (err) {
-    console.error('Error adding price history:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET LATEST PRICE FOR A PART
-app.get('/api/price-history/latest/:partId', authenticateToken, async (req, res) => {
-  try {
-    const { partId } = req.params;
-    
-    const result = await db.execute({
-      sql: `
-        SELECT price, created_at 
-        FROM price_history 
-        WHERE part_id = ? 
-        ORDER BY created_at DESC 
-        LIMIT 1
-      `,
-      args: [partId]
-    });
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'No price history found' });
-    }
-    
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error fetching latest price:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
 // PARTS CRUD ROUTES
 // ============================================================
 
@@ -1668,9 +1585,7 @@ const startServer = async () => {
       console.log(`   GET /api/gse-maintenance/:id/history - Get history for equipment`);
       console.log(`\n💰 Price History API:`);
       console.log(`   GET /api/price-history/:partId - Get last 10 price changes`);
-      console.log(`   GET /api/price-history/full/:partId - Get all price changes`);
       console.log(`   POST /api/price-history - Add price record and update current price`);
-      console.log(`   GET /api/price-history/latest/:partId - Get latest price`);
       console.log(`\n🔧 Maintenance Categories:`);
       console.log(`   Preventive - Updates next_service_date`);
       console.log(`   Corrective - Does NOT change next_service_date`);
