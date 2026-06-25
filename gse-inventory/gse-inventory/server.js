@@ -100,6 +100,252 @@ const sanitizeNumber = (value, defaultValue = 0) => {
 };
 
 // ============================================================
+// ⭐ RECEIVE PARTS - WITH PRICE TRACKING
+// ============================================================
+app.post('/api/receive-parts', authenticateToken, async (req, res) => {
+  console.log('\n=== 📥 RECEIVING PARTS ===');
+  console.log('User:', req.user.username);
+  console.log('Request body:', req.body);
+
+  try {
+    const { items, notes, receive_date } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'No items to receive' });
+    }
+
+    console.log(`📊 Receiving ${items.length} items`);
+
+    const results = {
+      received: [],
+      errors: [],
+      priceHistoryUpdated: []
+    };
+
+    for (const [index, item] of items.entries()) {
+      try {
+        const {
+          part_id,
+          part_number,
+          quantity,
+          unit_price,
+          total_price,
+          location_bin,
+          supplier,
+          po_number,
+          notes: itemNotes
+        } = item;
+
+        // Validate required fields
+        if (!part_id && !part_number) {
+          results.errors.push({ row: index + 1, error: 'Missing part_id or part_number' });
+          continue;
+        }
+
+        const sanitizedQuantity = sanitizeNumber(quantity, 1);
+        const sanitizedUnitPrice = sanitizeNumber(unit_price, 0);
+        const sanitizedTotalPrice = sanitizeNumber(total_price, sanitizedUnitPrice * sanitizedQuantity);
+
+        // Find the part
+        let partResult;
+        if (part_id) {
+          partResult = await db.execute({
+            sql: 'SELECT id, part_number, description, quantity_on_hand, current_price, unit_price FROM parts WHERE id = ?',
+            args: [part_id]
+          });
+        } else {
+          partResult = await db.execute({
+            sql: 'SELECT id, part_number, description, quantity_on_hand, current_price, unit_price FROM parts WHERE part_number = ?',
+            args: [part_number]
+          });
+        }
+
+        if (partResult.rows.length === 0) {
+          results.errors.push({ 
+            row: index + 1, 
+            error: `Part ${part_number || part_id} not found` 
+          });
+          continue;
+        }
+
+        const part = partResult.rows[0];
+        const partId = part.id;
+        const oldQuantity = part.quantity_on_hand || 0;
+        const oldPrice = part.current_price || 0;
+        const newQuantity = oldQuantity + sanitizedQuantity;
+
+        // Update part stock
+        await db.execute({
+          sql: `
+            UPDATE parts SET
+              quantity_on_hand = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          args: [newQuantity, partId]
+        });
+
+        // If price is provided, update the current price
+        let priceUpdated = false;
+        if (sanitizedUnitPrice > 0) {
+          await db.execute({
+            sql: `
+              UPDATE parts SET
+                unit_price = ?,
+                current_price = ?,
+                last_purchase_price = ?,
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `,
+            args: [sanitizedUnitPrice, sanitizedUnitPrice, sanitizedUnitPrice, partId]
+          });
+
+          // Record in price history
+          await db.execute({
+            sql: `
+              INSERT INTO price_history (
+                part_id, price, quantity, transaction_type, 
+                reference_number, notes, recorded_by, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `,
+            args: [
+              partId,
+              sanitizedUnitPrice,
+              sanitizedQuantity,
+              'RECEIVE',
+              po_number || '',
+              `Received ${sanitizedQuantity} units @ ${sanitizedUnitPrice} each. ${itemNotes || ''}`,
+              req.user.username
+            ]
+          });
+
+          priceUpdated = true;
+          results.priceHistoryUpdated.push({
+            part_number: part.part_number,
+            old_price: oldPrice,
+            new_price: sanitizedUnitPrice,
+            quantity: sanitizedQuantity
+          });
+
+          console.log(`💰 Price updated for ${part.part_number}: ${oldPrice} → ${sanitizedUnitPrice}`);
+        }
+
+        // Record transaction
+        await db.execute({
+          sql: `
+            INSERT INTO transactions (
+              part_id, transaction_type, quantity, price,
+              gse_registration, technician_name, work_order,
+              reference_number, notes, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          `,
+          args: [
+            partId,
+            'RECEIVE',
+            sanitizedQuantity,
+            sanitizedUnitPrice,
+            location_bin || '',
+            supplier || '',
+            po_number || '',
+            po_number || '',
+            `Received ${sanitizedQuantity} units. ${itemNotes || ''}`,
+            req.user.username
+          ]
+        });
+
+        results.received.push({
+          part_number: part.part_number,
+          description: part.description,
+          old_quantity: oldQuantity,
+          new_quantity: newQuantity,
+          added_quantity: sanitizedQuantity,
+          unit_price: sanitizedUnitPrice,
+          price_updated: priceUpdated
+        });
+
+        console.log(`✅ Received ${sanitizedQuantity} of ${part.part_number}`);
+
+      } catch (rowError) {
+        console.error(`❌ Error processing row ${index + 1}:`, rowError.message);
+        results.errors.push({
+          row: index + 1,
+          error: rowError.message,
+          data: item
+        });
+      }
+    }
+
+    console.log(`✅ Receive complete: ${results.received.length} items received`);
+
+    res.json({
+      success: true,
+      message: `Successfully received ${results.received.length} items`,
+      results: {
+        received: results.received.length,
+        priceHistoryUpdated: results.priceHistoryUpdated.length,
+        errors: results.errors.length
+      },
+      details: {
+        received: results.received,
+        priceHistoryUpdated: results.priceHistoryUpdated,
+        errors: results.errors
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Receive error:', error);
+    res.status(500).json({
+      error: 'Failed to receive parts',
+      details: error.message
+    });
+  }
+});
+
+// ============================================================
+// ⭐ GET RECEIVE HISTORY
+// ============================================================
+app.get('/api/receive-history', authenticateToken, async (req, res) => {
+  try {
+    const { startDate, endDate, partId } = req.query;
+
+    let query = `
+      SELECT 
+        t.*,
+        p.part_number,
+        p.description
+      FROM transactions t
+      LEFT JOIN parts p ON t.part_id = p.id
+      WHERE t.transaction_type = 'RECEIVE'
+    `;
+
+    const params = [];
+
+    if (startDate) {
+      query += ` AND date(t.created_at) >= date(?)`;
+      params.push(startDate);
+    }
+
+    if (endDate) {
+      query += ` AND date(t.created_at) <= date(?)`;
+      params.push(endDate);
+    }
+
+    if (partId) {
+      query += ` AND t.part_id = ?`;
+      params.push(partId);
+    }
+
+    query += ` ORDER BY t.created_at DESC`;
+
+    const result = await db.execute({ sql: query, args: params });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching receive history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // PRICE HISTORY ROUTES
 // ============================================================
 
@@ -122,18 +368,14 @@ app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
   }
 });
 
-// GET FULL PRICE HISTORY (No limit)
+// GET FULL PRICE HISTORY
 app.get('/api/price-history/full/:partId', authenticateToken, async (req, res) => {
   try {
     const { partId } = req.params;
-    console.log('💰 Getting full price history for part:', partId);
-    
     const result = await db.execute({
       sql: `SELECT * FROM price_history WHERE part_id = ? ORDER BY created_at DESC`,
       args: [partId]
     });
-    
-    console.log('✅ Found', result.rows.length, 'price history records');
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching full price history:', err.message);
@@ -145,8 +387,6 @@ app.get('/api/price-history/full/:partId', authenticateToken, async (req, res) =
 app.get('/api/price-history/latest/:partId', authenticateToken, async (req, res) => {
   try {
     const { partId } = req.params;
-    console.log('💰 Getting latest price for part:', partId);
-    
     const result = await db.execute({
       sql: `SELECT price, created_at FROM price_history WHERE part_id = ? ORDER BY created_at DESC LIMIT 1`,
       args: [partId]
@@ -166,8 +406,6 @@ app.get('/api/price-history/latest/:partId', authenticateToken, async (req, res)
 // ADD PRICE HISTORY RECORD
 app.post('/api/price-history', authenticateToken, async (req, res) => {
   const { part_id, price, quantity, transaction_type, notes } = req.body;
-  
-  console.log('💰 Adding price for part:', part_id, 'price:', price);
   
   try {
     const partResult = await db.execute({
@@ -543,6 +781,8 @@ app.get('/api/test', (req, res) => {
     message: 'Server is running!',
     timestamp: new Date().toISOString(),
     routes: {
+      receiveParts: '/api/receive-parts (POST)',
+      receiveHistory: '/api/receive-history (GET)',
       priceHistory: '/api/price-history/:partId',
       fullPriceHistory: '/api/price-history/full/:partId',
       latestPrice: '/api/price-history/latest/:partId',
@@ -1280,9 +1520,7 @@ app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) =>
   }
 });
 
-// ============================================================
-// ⭐ FIXED: RECORD SERVICE - WITH PROPER NUMBER VALIDATION
-// ============================================================
+// RECORD SERVICE
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   console.log('\n=== 🔧 RECORDING SERVICE ===');
   console.log('Maintenance ID:', req.params.id);
@@ -1301,7 +1539,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
   } = req.body;
 
   try {
-    // Get equipment details
     const result = await db.execute({
       sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
       args: [id]
@@ -1314,28 +1551,18 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     const equipment = result.rows[0];
     const isPreventive = maintenance_category === 'preventive';
 
-    // ========== SANITIZE ALL NUMBERS ==========
     const sanitizedCurrentHours = sanitizeNumber(current_hours, 0);
     const sanitizedTargetHours = sanitizeNumber(target_hours, equipment.target_hours || 0);
     const sanitizedMonthsInterval = sanitizeNumber(months_interval, 0);
     const sanitizedServiceIntervalMonths = sanitizeNumber(equipment.service_interval_months, 0);
     const sanitizedServiceIntervalYears = sanitizeNumber(equipment.service_interval_years, 0);
     const sanitizedServiceIntervalMonthsForHour = sanitizeNumber(equipment.service_interval_months_for_hour, 0);
-    const sanitizedServiceIntervalHours = sanitizeNumber(equipment.service_interval_hours, 0);
-
-    console.log('📊 Sanitized values:', {
-      current_hours: sanitizedCurrentHours,
-      target_hours: sanitizedTargetHours,
-      months_interval: sanitizedMonthsInterval,
-      service_interval_months: sanitizedServiceIntervalMonths
-    });
 
     let nextServiceDate = null;
     let nextServiceYear = null;
     let status = 'serviced';
 
     if (isPreventive) {
-      // PREVENTIVE: Update the schedule
       if (equipment.maintenance_type === 'hour') {
         const intervalMonths = sanitizedMonthsInterval > 0 ? sanitizedMonthsInterval : sanitizedServiceIntervalMonthsForHour;
         if (intervalMonths > 0 && service_date) {
@@ -1439,7 +1666,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         });
       }
     } else {
-      // CORRECTIVE: Only update last_service_date, DO NOT change next_service_date
       if (equipment.maintenance_type === 'hour') {
         await db.execute({
           sql: `
@@ -1493,7 +1719,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       }
     }
 
-    // Record in service history with category
     await db.execute({
       sql: `
         INSERT INTO service_history (
@@ -1979,12 +2204,9 @@ const startServer = async () => {
       console.log(`   admin / 1991 (Admin)`);
       console.log(`   manager / manager123 (Manager)`);
       console.log(`   storekeeper / keeper123 (Storekeeper)`);
-      console.log(`\n📊 Service History API:`);
-      console.log(`   GET /api/service-history/all - All history with filters`);
-      console.log(`   GET /api/service-history/equipment/:id - By equipment`);
-      console.log(`   GET /api/service-history/stats - Statistics`);
-      console.log(`\n📋 Maintenance History API:`);
-      console.log(`   GET /api/gse-maintenance/:id/history - Get history for equipment`);
+      console.log(`\n📥 Receive Parts API:`);
+      console.log(`   POST /api/receive-parts - Receive parts with price tracking`);
+      console.log(`   GET /api/receive-history - View receive history`);
       console.log(`\n💰 Price History API:`);
       console.log(`   GET /api/price-history/:partId - Get last 10 price changes`);
       console.log(`   GET /api/price-history/full/:partId - Get all price changes`);
@@ -1993,11 +2215,6 @@ const startServer = async () => {
       console.log(`   PUT /api/parts/:partId/price - Update price (React frontend)`);
       console.log(`\n📥 Import API:`);
       console.log(`   POST /api/parts/import - Import parts from Excel with auto-maintenance creation`);
-      console.log(`\n🔧 Maintenance Categories:`);
-      console.log(`   Preventive - Updates next_service_date`);
-      console.log(`   Corrective - Does NOT change next_service_date`);
-      console.log(`\n🛠️ Fix Endpoint:`);
-      console.log(`   POST /api/fix-categories - Fix NULL categories (Admin only)`);
       console.log(`\n🧪 Test Route:`);
       console.log(`   GET /api/test - Check if server is running`);
     });
