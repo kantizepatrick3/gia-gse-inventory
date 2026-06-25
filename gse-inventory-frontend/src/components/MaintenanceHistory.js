@@ -44,6 +44,7 @@ const MaintenanceHistory = ({ token }) => {
       setError('');
       console.log(`📊 Fetching history for equipment ID: ${equipmentId}`);
       
+      // Fetch up to 50 records to ensure we have at least 20
       const response = await axios.get(`${API_URL}/api/gse-maintenance/${equipmentId}/history?limit=50`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -71,6 +72,16 @@ const MaintenanceHistory = ({ token }) => {
           };
         }
       }
+      
+      // Sort history by service date (newest first)
+      historyData.sort((a, b) => {
+        const dateA = new Date(a.service_date || a.created_at || 0);
+        const dateB = new Date(b.service_date || b.created_at || 0);
+        return dateB - dateA;
+      });
+      
+      // Keep only the last 20 services
+      historyData = historyData.slice(0, 20);
       
       setHistory(historyData);
       setSelectedEquipment(equipmentData);
@@ -194,7 +205,6 @@ const MaintenanceHistory = ({ token }) => {
     setExportLoading(true);
     
     try {
-      // Prepare data for Excel
       const excelData = history.map((h, index) => ({
         '#': index + 1,
         'Service Date': h.service_date ? formatFullDate(h.service_date) : 'N/A',
@@ -207,11 +217,9 @@ const MaintenanceHistory = ({ token }) => {
         'Notes': h.notes || ''
       }));
 
-      // Create workbook
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(excelData);
 
-      // Set column widths
       ws['!cols'] = [
         { wch: 5 },   // #
         { wch: 20 },  // Service Date
@@ -226,10 +234,7 @@ const MaintenanceHistory = ({ token }) => {
 
       XLSX.utils.book_append_sheet(wb, ws, 'Maintenance History');
       
-      // Generate filename
       const fileName = `maintenance_history_${selectedEquipment?.name || selectedEquipment?.equipment_name || 'equipment'}_${new Date().toISOString().split('T')[0]}.xlsx`;
-      
-      // Download
       XLSX.writeFile(wb, fileName);
       
     } catch (error) {
@@ -257,7 +262,6 @@ const MaintenanceHistory = ({ token }) => {
         return;
       }
       
-      // Prepare data for Excel
       const excelData = data.map((item, index) => ({
         '#': index + 1,
         'Equipment': item.equipment_name || 'N/A',
@@ -301,7 +305,7 @@ const MaintenanceHistory = ({ token }) => {
   };
 
   // ============================================================
-  // EXPORT TO EXCEL - Single Equipment History (CSV fallback)
+  // EXPORT TO CSV
   // ============================================================
   const exportCSV = () => {
     if (history.length === 0) {
@@ -573,9 +577,9 @@ const MaintenanceHistory = ({ token }) => {
               borderRadius: '6px',
               marginBottom: '20px',
               border: '1px solid #e9ecef',
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '20px'
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '10px'
             }}>
               <div>
                 <span style={{ fontSize: '12px', color: '#666' }}>Equipment:</span>
@@ -596,7 +600,7 @@ const MaintenanceHistory = ({ token }) => {
                 </span>
               </div>
               <div>
-                <span style={{ fontSize: '12px', color: '#666' }}>Maintenance Category:</span>
+                <span style={{ fontSize: '12px', color: '#666' }}>Category:</span>
                 <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
                   {selectedEquipment.maintenance_category || selectedEquipment.category || 'Not specified'}
                 </span>
@@ -617,13 +621,33 @@ const MaintenanceHistory = ({ token }) => {
                   </span>
                 </div>
               )}
+              <div>
+                <span style={{ fontSize: '12px', color: '#666' }}>Total Services:</span>
+                <span style={{ fontWeight: 'bold', marginLeft: '5px', color: '#27ae60' }}>
+                  {history.length} (showing last 20)
+                </span>
+              </div>
             </div>
 
-            {/* History Table */}
+            {/* ============================================================
+                SERVICE HISTORY TABLE - Shows last 20 services
+                ============================================================ */}
             {history.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-                📭 No history records found for this equipment.
-              </p>
+              <div style={{
+                textAlign: 'center',
+                padding: '60px 20px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px dashed #ccc'
+              }}>
+                <div style={{ fontSize: '48px', marginBottom: '15px' }}>📭</div>
+                <p style={{ fontSize: '16px', color: '#666', margin: 0 }}>
+                  No service history records found for this equipment.
+                </p>
+                <p style={{ fontSize: '14px', color: '#999', marginTop: '5px' }}>
+                  Services will appear here once maintenance is recorded.
+                </p>
+              </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{
@@ -633,7 +657,7 @@ const MaintenanceHistory = ({ token }) => {
                 }}>
                   <thead>
                     <tr style={{ backgroundColor: '#2c3e50', color: 'white' }}>
-                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>#</th>
+                      <th style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>#</th>
                       <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Service Date</th>
                       <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Service Performed</th>
                       <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Technician</th>
@@ -649,7 +673,7 @@ const MaintenanceHistory = ({ token }) => {
                         <tr key={index} style={{
                           backgroundColor: index % 2 === 0 ? '#f9f9f9' : 'white'
                         }}>
-                          <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>
+                          <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center', fontWeight: 'bold' }}>
                             {index + 1}
                           </td>
                           <td style={{ padding: '8px', border: '1px solid #ddd' }}>
@@ -685,6 +709,13 @@ const MaintenanceHistory = ({ token }) => {
                       );
                     })}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ backgroundColor: '#f8f9fa', fontWeight: 'bold' }}>
+                      <td colSpan="7" style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>
+                        Showing {history.length} of {history.length} service records
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             )}
