@@ -2434,7 +2434,7 @@ app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res
 });
 
 // ============================================================
-// 📊 MAINTENANCE HISTORY - IMPROVED
+// 📊 MAINTENANCE HISTORY - FIXED
 // ============================================================
 app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) => {
   try {
@@ -2484,33 +2484,48 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
       maintenance_category: equipment.maintenance_category || equipment.category || 'Not specified'
     };
     
-    // Get service history
+    // ============================================================
+    // FIXED: Get service history with correct column names
+    // ============================================================
     let history = [];
     try {
+      // First, check what columns exist in service_history
+      const columnsCheck = await db.execute(`PRAGMA table_info(service_history)`);
+      const columnNames = columnsCheck.rows.map(c => c.name);
+      console.log('📋 Available columns in service_history:', columnNames.join(', '));
+      
+      // Build query with correct column names
+      let selectFields = `
+        id,
+        service_date,
+        service_performed,
+        technician_name,
+        notes,
+        maintenance_category as category,
+        current_hours as hours_at_service,
+        target_hours,
+        service_interval_months as interval_months,
+        recorded_by,
+        created_at
+      `;
+      
+      // Add next_service_date if it exists
+      if (columnNames.includes('next_service_date')) {
+        selectFields += ', next_service_date as next_service_due';
+      }
+      
       const historyResult = await db.execute({
         sql: `
-          SELECT 
-            id,
-            service_date,
-            service_performed,
-            technician_name,
-            notes,
-            maintenance_category as category,
-            current_hours as hours_at_service,
-            target_hours as target_hours,
-            service_interval_months as interval_months,
-            next_service_date as next_service_due,
-            recorded_by,
-            created_at
+          SELECT ${selectFields}
           FROM service_history
           WHERE maintenance_id = ?
-          ORDER BY service_date DESC, id DESC
+          ORDER BY created_at DESC
           LIMIT ?
         `,
         args: [equipmentId, parseInt(limit)]
       });
       history = historyResult.rows || [];
-      console.log(`✅ Found ${history.length} history records`);
+      console.log(`✅ Found ${history.length} history records in service_history`);
     } catch (err) {
       console.log('⚠️ Error fetching history:', err.message);
       history = [];
@@ -2790,7 +2805,7 @@ const startServer = async () => {
       console.log(`\n📥 Import API:`);
       console.log(`   POST /api/parts/import - Import parts from Excel`);
       console.log(`\n🔧 Maintenance History API:`);
-      console.log(`   GET /api/gse-maintenance/:id/history - Get maintenance history (with fallback)`);
+      console.log(`   GET /api/gse-maintenance/:id/history - Get maintenance history (FIXED)`);
       console.log(`   GET /api/debug/maintenance - Debug maintenance equipment`);
       console.log(`   GET /api/maintenance/all - Get all maintenance for dropdown`);
       console.log(`\n🛠️ Service Recording:`);
