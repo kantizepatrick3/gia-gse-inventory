@@ -86,7 +86,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 // ============================================================
-// ⭐ PRICE HISTORY ROUTES - MOVED TO TOP FOR RELIABILITY ⭐
+// ⭐ PRICE HISTORY ROUTES - AT THE VERY TOP ⭐
 // ============================================================
 
 // GET PRICE HISTORY FOR A SPECIFIC PART
@@ -94,13 +94,6 @@ app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
   try {
     const { partId } = req.params;
     console.log('💰 Getting price history for part:', partId);
-    
-    // Check if price_history table exists
-    const tableCheck = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='price_history'");
-    if (tableCheck.rows.length === 0) {
-      console.log('⚠️ Price history table does not exist yet');
-      return res.json([]);
-    }
     
     const result = await db.execute({
       sql: `SELECT * FROM price_history WHERE part_id = ? ORDER BY created_at DESC LIMIT 10`,
