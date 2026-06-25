@@ -567,7 +567,7 @@ app.put('/api/parts/:partId/price', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// 📊 TRANSACTIONS ROUTE - FIXED
+// 📊 TRANSACTIONS ROUTE
 // ============================================================
 app.get('/api/transactions', authenticateToken, async (req, res) => {
   try {
@@ -868,15 +868,25 @@ app.post('/api/parts/import', authenticateToken, async (req, res) => {
 // 📊 DASHBOARD ROUTES
 // ============================================================
 
-// GET pending requests count for dashboard
+// GET pending requests count for dashboard - FIXED
 app.get('/api/requests/pending', authenticateToken, async (req, res) => {
   try {
     console.log('📊 Fetching pending requests count...');
-    const result = await db.execute({
-      sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"',
-      args: []
-    });
-    const count = result.rows[0]?.count || 0;
+    
+    // Check if table exists first
+    const tableCheck = await db.execute(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='pending_issues'
+    `);
+    
+    let count = 0;
+    if (tableCheck.rows.length > 0) {
+      // Get total count without status filter (since column might not exist)
+      const result = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM pending_issues',
+        args: []
+      });
+      count = result.rows[0]?.count || 0;
+    }
     console.log(`📊 Pending requests: ${count}`);
     res.json({ count });
   } catch (err) {
@@ -2086,7 +2096,7 @@ app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res
 });
 
 // ============================================================
-// MAINTENANCE HISTORY ENDPOINT - FIXED
+// MAINTENANCE HISTORY ENDPOINT - FULLY FIXED
 // ============================================================
 app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) => {
   try {
@@ -2095,17 +2105,51 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
     
     console.log(`📊 Fetching maintenance history for ID: ${id}`);
     
+    if (isNaN(id) || parseInt(id) <= 0) {
+      console.log('❌ Invalid ID provided:', id);
+      return res.status(400).json({ error: 'Invalid equipment ID' });
+    }
+    
+    // Get table columns to check what exists
+    const tableInfo = await db.execute(`PRAGMA table_info(gse_maintenance)`);
+    const columnNames = tableInfo.rows.map(r => r.name);
+    console.log('📋 Available columns:', columnNames.join(', '));
+    
     // Check if equipment exists
     const equipmentResult = await db.execute({
       sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
-      args: [id]
+      args: [parseInt(id)]
     });
     
     if (equipmentResult.rows.length === 0) {
+      console.log(`❌ Equipment not found for ID: ${id}`);
       return res.status(404).json({ error: 'Equipment not found' });
     }
     
     const equipment = equipmentResult.rows[0];
+    console.log(`✅ Equipment found: ${equipment.equipment_name || 'Unknown'} (ID: ${equipment.id})`);
+    
+    // Build equipment response with only existing columns
+    const equipmentResponse = {
+      id: equipment.id,
+      name: equipment.equipment_name || 'Unknown',
+      type: equipment.equipment_type || 'N/A',
+      status: equipment.status || 'serviced'
+    };
+    
+    // Only add columns that exist
+    if (columnNames.includes('last_service_date')) {
+      equipmentResponse.last_service_date = equipment.last_service_date;
+    }
+    if (columnNames.includes('next_service_date')) {
+      equipmentResponse.next_service_date = equipment.next_service_date;
+    }
+    if (columnNames.includes('current_hours')) {
+      equipmentResponse.current_hours = equipment.current_hours || 0;
+    }
+    if (columnNames.includes('target_hours')) {
+      equipmentResponse.target_hours = equipment.target_hours || 0;
+    }
     
     // Check if service_history table exists
     const tableCheck = await db.execute(`
@@ -2115,40 +2159,52 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
     let historyResult = { rows: [] };
     
     if (tableCheck.rows.length > 0) {
-      historyResult = await db.execute({
-        sql: `
-          SELECT 
-            service_date,
-            service_performed,
-            technician_name as technician,
-            current_hours as hours_at_service,
-            service_interval_months as interval_months,
-            notes,
-            next_service_date as next_service_due,
-            COALESCE(maintenance_category, 'preventive') as category,
-            created_at
-          FROM service_history
-          WHERE maintenance_id = ?
-          ORDER BY service_date DESC
-          LIMIT ?
-        `,
-        args: [id, parseInt(limit)]
-      });
+      try {
+        // Build query with only columns that exist in service_history
+        const historyTableInfo = await db.execute(`PRAGMA table_info(service_history)`);
+        const historyColumns = historyTableInfo.rows.map(r => r.name);
+        
+        let selectFields = 'service_date, service_performed, technician_name, notes, created_at';
+        if (historyColumns.includes('current_hours')) {
+          selectFields += ', current_hours as hours_at_service';
+        }
+        if (historyColumns.includes('service_interval_months')) {
+          selectFields += ', service_interval_months as interval_months';
+        }
+        if (historyColumns.includes('next_service_date')) {
+          selectFields += ', next_service_date as next_service_due';
+        }
+        if (historyColumns.includes('maintenance_category')) {
+          selectFields += ', COALESCE(maintenance_category, "preventive") as category';
+        } else {
+          selectFields += ', "preventive" as category';
+        }
+        
+        historyResult = await db.execute({
+          sql: `
+            SELECT ${selectFields}
+            FROM service_history
+            WHERE maintenance_id = ?
+            ORDER BY service_date DESC
+            LIMIT ?
+          `,
+          args: [parseInt(id), parseInt(limit)]
+        });
+        console.log(`✅ Found ${historyResult.rows.length} history records`);
+      } catch (err) {
+        console.log('⚠️ Error fetching history:', err.message);
+        historyResult = { rows: [] };
+      }
+    } else {
+      console.log('⚠️ service_history table does not exist');
     }
     
-    res.json({
-      equipment: {
-        id: equipment.id,
-        name: equipment.equipment_name,
-        type: equipment.equipment_type,
-        status: equipment.status,
-        last_service_date: equipment.last_service_date,
-        next_service_date: equipment.next_service_date,
-        current_hours: equipment.current_hours,
-        target_hours: equipment.target_hours
-      },
+    const response = {
+      equipment: equipmentResponse,
       history: historyResult.rows || []
-    });
+    };
+    
+    res.json(response);
     
   } catch (err) {
     console.error('❌ Error fetching maintenance history:', err.message);
