@@ -55,17 +55,17 @@ app.get('/api/test', (req, res) => {
       login: '/api/login',
       parts: '/api/parts',
       partsById: '/api/parts/:id',
+      addPart: '/api/parts (POST)',
+      receivePart: '/api/receive (POST)',
+      receiveParts: '/api/receive-parts (POST)',
+      issuePart: '/api/issue (POST)',
+      pendingApprovals: '/api/approvals/pending (GET)',
+      approveRequest: '/api/approvals/:id/approve (PUT)',
+      rejectRequest: '/api/approvals/:id/reject (PUT)',
       priceHistory: '/api/price-history/:partId',
-      priceHistoryPost: '/api/price-history',
-      receiveParts: '/api/receive-parts',
-      gseMaintenance: '/api/gse-maintenance',
-      transactions: '/api/transactions',
       transactionsReceive: '/api/transactions/receive',
-      transactionsIssue: '/api/transactions/issue',
-      requestsPending: '/api/requests/pending',
-      requestsMyRequests: '/api/requests/my-requests',
       requestsIssue: '/api/requests/issue',
-      dashboard: '/api/reports/low-stock'
+      myRequests: '/api/requests/my-requests'
     }
   });
 });
@@ -127,6 +127,628 @@ const sanitizeNumber = (value, defaultValue = 0) => {
   }
   return num;
 };
+
+// ============================================================
+// ⭐ PARTS CRUD ROUTES - COMPLETE
+// ============================================================
+
+// GET ALL PARTS
+app.get('/api/parts', authenticateToken, async (req, res) => {
+  try {
+    console.log('📦 Fetching all parts...');
+    const result = await db.execute('SELECT * FROM parts ORDER BY part_number');
+    console.log(`✅ Found ${result.rows.length} parts`);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching parts:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET PART BY ID
+app.get('/api/parts/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📦 Fetching part with ID: ${id}`);
+    
+    const partId = parseInt(id);
+    if (isNaN(partId)) {
+      return res.status(400).json({ error: 'Invalid part ID' });
+    }
+    
+    const result = await db.execute({
+      sql: 'SELECT * FROM parts WHERE id = ?',
+      args: [partId]
+    });
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching part:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET PARTS COUNT
+app.get('/api/parts/count', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT COUNT(*) as count FROM parts',
+      args: []
+    });
+    res.json({ count: result.rows[0]?.count || 0 });
+  } catch (err) {
+    console.error('Error fetching parts count:', err.message);
+    res.json({ count: 0 });
+  }
+});
+
+// ============================================================
+// ⭐ ADD NEW PART - POST
+// ============================================================
+app.post('/api/parts', authenticateToken, async (req, res) => {
+  console.log('\n=== 📦 ADDING NEW PART ===');
+  console.log('User:', req.user.username);
+  console.log('Request body:', req.body);
+
+  try {
+    const {
+      part_number,
+      description,
+      manufacturer,
+      compatible_gse,
+      location_bin,
+      quantity_on_hand = 0,
+      min_stock = 0,
+      max_stock = 100,
+      unit_price = 0,
+      current_price = 0,
+      maintenance_type = 'none',
+      service_interval_hours = 0,
+      service_interval_months = 0,
+      service_interval_years = 0,
+      contact_person = '',
+      contact_phone = '',
+      contact_email = ''
+    } = req.body;
+
+    // Validate required fields
+    if (!part_number) {
+      return res.status(400).json({ error: 'Part number is required' });
+    }
+    if (!description) {
+      return res.status(400).json({ error: 'Description is required' });
+    }
+
+    // Check if part already exists
+    const existing = await db.execute({
+      sql: 'SELECT id FROM parts WHERE part_number = ?',
+      args: [part_number]
+    });
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: `Part "${part_number}" already exists` });
+    }
+
+    // Insert new part
+    const result = await db.execute({
+      sql: `
+        INSERT INTO parts (
+          part_number, description, manufacturer, compatible_gse,
+          location_bin, quantity_on_hand, min_stock, max_stock,
+          unit_price, current_price, maintenance_type,
+          service_interval_hours, service_interval_months, service_interval_years,
+          contact_person, contact_phone, contact_email,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING id
+      `,
+      args: [
+        part_number,
+        description,
+        manufacturer || '',
+        compatible_gse || '',
+        location_bin || '',
+        sanitizeNumber(quantity_on_hand, 0),
+        sanitizeNumber(min_stock, 0),
+        sanitizeNumber(max_stock, 100),
+        sanitizeNumber(unit_price, 0),
+        sanitizeNumber(current_price, 0),
+        maintenance_type || 'none',
+        sanitizeNumber(service_interval_hours, 0),
+        sanitizeNumber(service_interval_months, 0),
+        sanitizeNumber(service_interval_years, 0),
+        contact_person || '',
+        contact_phone || '',
+        contact_email || ''
+      ]
+    });
+
+    const newId = result.rows[0].id;
+    console.log(`✅ Part "${part_number}" added with ID: ${newId}`);
+
+    res.status(201).json({
+      success: true,
+      message: `Part "${part_number}" added successfully`,
+      id: newId
+    });
+
+  } catch (err) {
+    console.error('❌ Error adding part:', err.message);
+    res.status(500).json({
+      error: 'Failed to add part',
+      details: err.message
+    });
+  }
+});
+
+// UPDATE PART
+app.put('/api/parts/:id', authenticateToken, async (req, res) => {
+  console.log('\n=== 🔄 UPDATING PART ===');
+  console.log('Part ID:', req.params.id);
+  console.log('Request body:', req.body);
+
+  try {
+    const { id } = req.params;
+    const {
+      description,
+      manufacturer,
+      compatible_gse,
+      location_bin,
+      min_stock,
+      max_stock,
+      unit_price,
+      current_price,
+      maintenance_type,
+      service_interval_hours,
+      service_interval_months,
+      service_interval_years,
+      contact_person,
+      contact_phone,
+      contact_email
+    } = req.body;
+
+    const partId = parseInt(id);
+    if (isNaN(partId)) {
+      return res.status(400).json({ error: 'Invalid part ID' });
+    }
+
+    // Check if part exists
+    const existing = await db.execute({
+      sql: 'SELECT id FROM parts WHERE id = ?',
+      args: [partId]
+    });
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+
+    await db.execute({
+      sql: `
+        UPDATE parts SET
+          description = ?,
+          manufacturer = ?,
+          compatible_gse = ?,
+          location_bin = ?,
+          min_stock = ?,
+          max_stock = ?,
+          unit_price = ?,
+          current_price = ?,
+          maintenance_type = ?,
+          service_interval_hours = ?,
+          service_interval_months = ?,
+          service_interval_years = ?,
+          contact_person = ?,
+          contact_phone = ?,
+          contact_email = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [
+        description || '',
+        manufacturer || '',
+        compatible_gse || '',
+        location_bin || '',
+        sanitizeNumber(min_stock, 0),
+        sanitizeNumber(max_stock, 100),
+        sanitizeNumber(unit_price, 0),
+        sanitizeNumber(current_price, 0),
+        maintenance_type || 'none',
+        sanitizeNumber(service_interval_hours, 0),
+        sanitizeNumber(service_interval_months, 0),
+        sanitizeNumber(service_interval_years, 0),
+        contact_person || '',
+        contact_phone || '',
+        contact_email || '',
+        partId
+      ]
+    });
+
+    console.log(`✅ Part ID ${partId} updated successfully`);
+    res.json({
+      success: true,
+      message: 'Part updated successfully'
+    });
+
+  } catch (err) {
+    console.error('❌ Error updating part:', err.message);
+    res.status(500).json({ error: 'Failed to update part', details: err.message });
+  }
+});
+
+// DELETE PART
+app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
+  console.log('\n=== 🗑️ DELETING PART ===');
+  console.log('Part ID:', req.params.id);
+
+  try {
+    const { id } = req.params;
+    const partId = parseInt(id);
+    if (isNaN(partId)) {
+      return res.status(400).json({ error: 'Invalid part ID' });
+    }
+
+    // Check if part exists
+    const existing = await db.execute({
+      sql: 'SELECT part_number FROM parts WHERE id = ?',
+      args: [partId]
+    });
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+
+    const partNumber = existing.rows[0].part_number;
+
+    // Delete part (cascade will handle related records)
+    await db.execute({
+      sql: 'DELETE FROM parts WHERE id = ?',
+      args: [partId]
+    });
+
+    console.log(`✅ Part "${partNumber}" deleted successfully`);
+    res.json({
+      success: true,
+      message: `Part "${partNumber}" deleted successfully`
+    });
+
+  } catch (err) {
+    console.error('❌ Error deleting part:', err.message);
+    res.status(500).json({ error: 'Failed to delete part', details: err.message });
+  }
+});
+
+// ============================================================
+// ⭐ RECEIVE PART - POST
+// ============================================================
+app.post('/api/receive', authenticateToken, async (req, res) => {
+  console.log('\n=== 📥 RECEIVING PART ===');
+  console.log('User:', req.user.username);
+  console.log('Request body:', req.body);
+
+  try {
+    const { part_number, quantity, unit_price, location_bin, supplier, notes, po_number } = req.body;
+
+    if (!part_number) {
+      return res.status(400).json({ error: 'Part number is required' });
+    }
+
+    if (!quantity || quantity <= 0) {
+      return res.status(400).json({ error: 'Valid quantity is required' });
+    }
+
+    // Find the part
+    const partResult = await db.execute({
+      sql: 'SELECT id, part_number, quantity_on_hand, current_price FROM parts WHERE part_number = ?',
+      args: [part_number]
+    });
+
+    if (partResult.rows.length === 0) {
+      return res.status(404).json({ error: `Part "${part_number}" not found` });
+    }
+
+    const part = partResult.rows[0];
+    const partId = part.id;
+    const oldQuantity = part.quantity_on_hand || 0;
+    const newQuantity = oldQuantity + parseInt(quantity);
+    const sanitizedUnitPrice = parseFloat(unit_price) || 0;
+
+    // Update quantity
+    await db.execute({
+      sql: 'UPDATE parts SET quantity_on_hand = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      args: [newQuantity, partId]
+    });
+
+    // Update price if provided
+    if (sanitizedUnitPrice > 0) {
+      await db.execute({
+        sql: 'UPDATE parts SET unit_price = ?, current_price = ? WHERE id = ?',
+        args: [sanitizedUnitPrice, sanitizedUnitPrice, partId]
+      });
+
+      // Record price history
+      await db.execute({
+        sql: `
+          INSERT INTO price_history (part_id, price, quantity, transaction_type, notes, recorded_by, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `,
+        args: [
+          partId,
+          sanitizedUnitPrice,
+          parseInt(quantity),
+          'RECEIVE',
+          notes || `Received ${quantity} units from ${supplier || 'unknown supplier'}`,
+          req.user.username
+        ]
+      });
+    }
+
+    // Record transaction
+    await db.execute({
+      sql: `
+        INSERT INTO transactions (part_id, transaction_type, quantity, price, notes, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `,
+      args: [
+        partId,
+        'RECEIVE',
+        parseInt(quantity),
+        sanitizedUnitPrice,
+        notes || `Received from ${supplier || 'unknown'}`,
+        req.user.username
+      ]
+    });
+
+    console.log(`✅ Received ${quantity} of "${part_number}"`);
+    res.json({
+      success: true,
+      message: `Received ${quantity} of "${part_number}" successfully`,
+      data: {
+        part_number: part_number,
+        old_quantity: oldQuantity,
+        new_quantity: newQuantity,
+        added_quantity: parseInt(quantity),
+        unit_price: sanitizedUnitPrice
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Error receiving part:', err.message);
+    res.status(500).json({ error: 'Failed to receive part', details: err.message });
+  }
+});
+
+// ============================================================
+// ⭐ ISSUE PART - POST
+// ============================================================
+app.post('/api/issue', authenticateToken, async (req, res) => {
+  console.log('\n=== 📤 ISSUING PART ===');
+  console.log('User:', req.user.username);
+  console.log('Request body:', req.body);
+
+  try {
+    const { part_number, quantity, technician_name, gse_registration, work_order, notes } = req.body;
+
+    if (!part_number) {
+      return res.status(400).json({ error: 'Part number is required' });
+    }
+
+    if (!quantity || quantity <= 0) {
+      return res.status(400).json({ error: 'Valid quantity is required' });
+    }
+
+    // Find the part
+    const partResult = await db.execute({
+      sql: 'SELECT id, part_number, quantity_on_hand, current_price FROM parts WHERE part_number = ?',
+      args: [part_number]
+    });
+
+    if (partResult.rows.length === 0) {
+      return res.status(404).json({ error: `Part "${part_number}" not found` });
+    }
+
+    const part = partResult.rows[0];
+    const partId = part.id;
+    const oldQuantity = part.quantity_on_hand || 0;
+    const newQuantity = oldQuantity - parseInt(quantity);
+
+    if (newQuantity < 0) {
+      return res.status(400).json({ error: `Insufficient stock. Available: ${oldQuantity}` });
+    }
+
+    // Update quantity
+    await db.execute({
+      sql: 'UPDATE parts SET quantity_on_hand = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      args: [newQuantity, partId]
+    });
+
+    // Record transaction
+    await db.execute({
+      sql: `
+        INSERT INTO transactions (part_id, transaction_type, quantity, price, gse_registration, technician_name, work_order, notes, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `,
+      args: [
+        partId,
+        'ISSUE',
+        parseInt(quantity),
+        0,
+        gse_registration || '',
+        technician_name || '',
+        work_order || '',
+        notes || `Issued ${quantity} to ${technician_name || 'unknown'}`,
+        req.user.username
+      ]
+    });
+
+    console.log(`✅ Issued ${quantity} of "${part_number}"`);
+    res.json({
+      success: true,
+      message: `Issued ${quantity} of "${part_number}" successfully`,
+      data: {
+        part_number: part_number,
+        old_quantity: oldQuantity,
+        new_quantity: newQuantity,
+        issued_quantity: parseInt(quantity)
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Error issuing part:', err.message);
+    res.status(500).json({ error: 'Failed to issue part', details: err.message });
+  }
+});
+
+// ============================================================
+// ⭐ APPROVALS ROUTES
+// ============================================================
+
+// GET PENDING APPROVALS
+app.get('/api/approvals/pending', authenticateToken, async (req, res) => {
+  try {
+    console.log('📋 Fetching pending approvals...');
+    
+    const result = await db.execute({
+      sql: 'SELECT * FROM pending_issues WHERE status = "pending" ORDER BY created_at DESC',
+      args: []
+    });
+    
+    console.log(`✅ Found ${result.rows.length} pending approvals`);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching pending approvals:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// APPROVE REQUEST
+app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
+  console.log('\n=== ✅ APPROVING REQUEST ===');
+  console.log('Request ID:', req.params.id);
+  console.log('Approved by:', req.user.username);
+
+  try {
+    const { id } = req.params;
+    const requestId = parseInt(id);
+    if (isNaN(requestId)) {
+      return res.status(400).json({ error: 'Invalid request ID' });
+    }
+
+    // Get the request
+    const requestResult = await db.execute({
+      sql: 'SELECT * FROM pending_issues WHERE id = ?',
+      args: [requestId]
+    });
+
+    if (requestResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    const request = requestResult.rows[0];
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ error: `Request is already ${request.status}` });
+    }
+
+    // Update request status
+    await db.execute({
+      sql: `
+        UPDATE pending_issues SET
+          status = 'approved',
+          approved_by = ?,
+          approved_at = CURRENT_TIMESTAMP,
+          admin_comment = ?
+        WHERE id = ?
+      `,
+      args: [req.user.username, req.body.comment || 'Approved', requestId]
+    });
+
+    // Update part quantity
+    if (request.part_id) {
+      const partResult = await db.execute({
+        sql: 'SELECT quantity_on_hand FROM parts WHERE id = ?',
+        args: [request.part_id]
+      });
+
+      if (partResult.rows.length > 0) {
+        const currentQty = partResult.rows[0].quantity_on_hand || 0;
+        const newQty = currentQty - request.quantity;
+        
+        if (newQty >= 0) {
+          await db.execute({
+            sql: 'UPDATE parts SET quantity_on_hand = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            args: [newQty, request.part_id]
+          });
+        }
+      }
+    }
+
+    console.log(`✅ Request ${requestId} approved by ${req.user.username}`);
+    res.json({
+      success: true,
+      message: 'Request approved successfully'
+    });
+
+  } catch (err) {
+    console.error('❌ Error approving request:', err.message);
+    res.status(500).json({ error: 'Failed to approve request', details: err.message });
+  }
+});
+
+// REJECT REQUEST
+app.put('/api/approvals/:id/reject', authenticateToken, async (req, res) => {
+  console.log('\n=== ❌ REJECTING REQUEST ===');
+  console.log('Request ID:', req.params.id);
+  console.log('Rejected by:', req.user.username);
+
+  try {
+    const { id } = req.params;
+    const requestId = parseInt(id);
+    if (isNaN(requestId)) {
+      return res.status(400).json({ error: 'Invalid request ID' });
+    }
+
+    // Get the request
+    const requestResult = await db.execute({
+      sql: 'SELECT * FROM pending_issues WHERE id = ?',
+      args: [requestId]
+    });
+
+    if (requestResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    const request = requestResult.rows[0];
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ error: `Request is already ${request.status}` });
+    }
+
+    // Update request status
+    await db.execute({
+      sql: `
+        UPDATE pending_issues SET
+          status = 'rejected',
+          admin_comment = ?
+        WHERE id = ?
+      `,
+      args: [req.body.comment || 'Rejected', requestId]
+    });
+
+    console.log(`✅ Request ${requestId} rejected by ${req.user.username}`);
+    res.json({
+      success: true,
+      message: 'Request rejected successfully'
+    });
+
+  } catch (err) {
+    console.error('❌ Error rejecting request:', err.message);
+    res.status(500).json({ error: 'Failed to reject request', details: err.message });
+  }
+});
 
 // ============================================================
 // ⭐ PRICE HISTORY ROUTES
@@ -202,46 +824,167 @@ app.post('/api/price-history', authenticateToken, async (req, res) => {
   }
 });
 
-// GET FULL PRICE HISTORY (No limit)
-app.get('/api/price-history/full/:partId', authenticateToken, async (req, res) => {
-  try {
-    const { partId } = req.params;
-    const result = await db.execute({
-      sql: `SELECT * FROM price_history WHERE part_id = ? ORDER BY created_at DESC`,
-      args: [partId]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching full price history:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+// ============================================================
+// 📊 TRANSACTIONS ROUTES
+// ============================================================
 
-// GET LATEST PRICE FOR A PART
-app.get('/api/price-history/latest/:partId', authenticateToken, async (req, res) => {
+// GET ALL TRANSACTIONS
+app.get('/api/transactions', authenticateToken, async (req, res) => {
   try {
-    const { partId } = req.params;
-    const result = await db.execute({
-      sql: `SELECT price, created_at FROM price_history WHERE part_id = ? ORDER BY created_at DESC LIMIT 1`,
-      args: [partId]
-    });
+    const { limit = 100, offset = 0, type, part_id } = req.query;
+    
+    let query = `
+      SELECT 
+        t.*,
+        p.part_number,
+        p.description
+      FROM transactions t
+      LEFT JOIN parts p ON t.part_id = p.id
+      WHERE 1=1
+    `;
+    const params = [];
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'No price history found' });
+    if (type) {
+      query += ` AND t.transaction_type = ?`;
+      params.push(type);
     }
 
-    res.json(result.rows[0]);
+    if (part_id) {
+      query += ` AND t.part_id = ?`;
+      params.push(part_id);
+    }
+
+    query += ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await db.execute({ sql: query, args: params });
+    res.json(result.rows);
   } catch (err) {
-    console.error('Error fetching latest price:', err.message);
+    console.error('Error fetching transactions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET RECEIVE TRANSACTIONS
+app.get('/api/transactions/receive', authenticateToken, async (req, res) => {
+  try {
+    console.log('📥 Fetching receive transactions...');
+    const result = await db.execute({
+      sql: `
+        SELECT 
+          t.*,
+          p.part_number,
+          p.description
+        FROM transactions t
+        LEFT JOIN parts p ON t.part_id = p.id
+        WHERE t.transaction_type = 'RECEIVE'
+        ORDER BY t.created_at DESC
+        LIMIT 100
+      `,
+      args: []
+    });
+    console.log(`✅ Found ${result.rows.length} receive transactions`);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching receive transactions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET ISSUE TRANSACTIONS
+app.get('/api/transactions/issue', authenticateToken, async (req, res) => {
+  try {
+    console.log('📤 Fetching issue transactions...');
+    const result = await db.execute({
+      sql: `
+        SELECT 
+          t.*,
+          p.part_number,
+          p.description
+        FROM transactions t
+        LEFT JOIN parts p ON t.part_id = p.id
+        WHERE t.transaction_type = 'ISSUE'
+        ORDER BY t.created_at DESC
+        LIMIT 100
+      `,
+      args: []
+    });
+    console.log(`✅ Found ${result.rows.length} issue transactions`);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching issue transactions:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ============================================================
-// ⭐ RECEIVE PARTS - WITH PRICE TRACKING
+// 📋 REQUESTS ROUTES
+// ============================================================
+
+// GET MY REQUESTS
+app.get('/api/requests/my-requests', authenticateToken, async (req, res) => {
+  try {
+    console.log('📋 Fetching my requests for user:', req.user.username);
+    
+    const result = await db.execute({
+      sql: 'SELECT * FROM pending_issues WHERE requested_by_name = ? ORDER BY created_at DESC',
+      args: [req.user.username]
+    });
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching my requests:', err.message);
+    res.json([]);
+  }
+});
+
+// GET ISSUE REQUESTS
+app.get('/api/requests/issue', authenticateToken, async (req, res) => {
+  try {
+    console.log('📋 Fetching issue requests...');
+    
+    const result = await db.execute({
+      sql: 'SELECT * FROM pending_issues ORDER BY created_at DESC LIMIT 100',
+      args: []
+    });
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching issue requests:', err.message);
+    res.json([]);
+  }
+});
+
+// GET PENDING REQUESTS
+app.get('/api/requests/pending', authenticateToken, async (req, res) => {
+  try {
+    console.log('📊 Fetching pending requests count...');
+    
+    const tableCheck = await db.execute(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='pending_issues'
+    `);
+    
+    let count = 0;
+    if (tableCheck.rows.length > 0) {
+      const result = await db.execute({
+        sql: 'SELECT COUNT(*) as count FROM pending_issues',
+        args: []
+      });
+      count = result.rows[0]?.count || 0;
+    }
+    console.log(`📊 Pending requests: ${count}`);
+    res.json({ count });
+  } catch (err) {
+    console.error('Error fetching pending requests:', err.message);
+    res.json({ count: 0 });
+  }
+});
+
+// ============================================================
+// ⭐ RECEIVE PARTS - WITH PRICE TRACKING (Original)
 // ============================================================
 app.post('/api/receive-parts', authenticateToken, async (req, res) => {
-  console.log('\n=== 📥 RECEIVING PARTS ===');
+  console.log('\n=== 📥 RECEIVING PARTS (Bulk) ===');
   console.log('User:', req.user.username);
   console.log('Request body:', req.body);
 
@@ -573,227 +1316,6 @@ app.put('/api/parts/:partId/price', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// 📊 TRANSACTIONS ROUTE
-// ============================================================
-app.get('/api/transactions', authenticateToken, async (req, res) => {
-  try {
-    const { limit = 100, offset = 0, type, part_id } = req.query;
-    
-    let query = `
-      SELECT 
-        t.*,
-        p.part_number,
-        p.description
-      FROM transactions t
-      LEFT JOIN parts p ON t.part_id = p.id
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (type) {
-      query += ` AND t.transaction_type = ?`;
-      params.push(type);
-    }
-
-    if (part_id) {
-      query += ` AND t.part_id = ?`;
-      params.push(part_id);
-    }
-
-    query += ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
-    params.push(parseInt(limit), parseInt(offset));
-
-    const result = await db.execute({ sql: query, args: params });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching transactions:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// 📥 TRANSACTIONS RECEIVE
-// ============================================================
-app.get('/api/transactions/receive', authenticateToken, async (req, res) => {
-  try {
-    console.log('📥 Fetching receive transactions...');
-    const result = await db.execute({
-      sql: `
-        SELECT 
-          t.*,
-          p.part_number,
-          p.description
-        FROM transactions t
-        LEFT JOIN parts p ON t.part_id = p.id
-        WHERE t.transaction_type = 'RECEIVE'
-        ORDER BY t.created_at DESC
-        LIMIT 100
-      `,
-      args: []
-    });
-    console.log(`✅ Found ${result.rows.length} receive transactions`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching receive transactions:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// 📤 TRANSACTIONS ISSUE
-// ============================================================
-app.get('/api/transactions/issue', authenticateToken, async (req, res) => {
-  try {
-    console.log('📤 Fetching issue transactions...');
-    const result = await db.execute({
-      sql: `
-        SELECT 
-          t.*,
-          p.part_number,
-          p.description
-        FROM transactions t
-        LEFT JOIN parts p ON t.part_id = p.id
-        WHERE t.transaction_type = 'ISSUE'
-        ORDER BY t.created_at DESC
-        LIMIT 100
-      `,
-      args: []
-    });
-    console.log(`✅ Found ${result.rows.length} issue transactions`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching issue transactions:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// 📥 RECEIVE PARTS - Alternative endpoint
-// ============================================================
-app.post('/api/receive', authenticateToken, async (req, res) => {
-  console.log('\n=== 📥 RECEIVE PARTS (alternative endpoint) ===');
-  console.log('User:', req.user.username);
-  console.log('Request body:', req.body);
-  
-  try {
-    const { items } = req.body;
-    
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'No items to receive' });
-    }
-    
-    const results = {
-      received: [],
-      errors: []
-    };
-    
-    for (const [index, item] of items.entries()) {
-      try {
-        const { part_id, quantity, unit_price, location_bin } = item;
-        
-        if (!part_id) {
-          results.errors.push({ row: index + 1, error: 'Missing part_id' });
-          continue;
-        }
-        
-        const partResult = await db.execute({
-          sql: 'SELECT id, part_number, quantity_on_hand FROM parts WHERE id = ?',
-          args: [part_id]
-        });
-        
-        if (partResult.rows.length === 0) {
-          results.errors.push({ row: index + 1, error: 'Part not found' });
-          continue;
-        }
-        
-        const part = partResult.rows[0];
-        const sanitizedQuantity = parseInt(quantity) || 1;
-        const sanitizedUnitPrice = parseFloat(unit_price) || 0;
-        const newQuantity = (part.quantity_on_hand || 0) + sanitizedQuantity;
-        
-        await db.execute({
-          sql: 'UPDATE parts SET quantity_on_hand = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          args: [newQuantity, part_id]
-        });
-        
-        if (sanitizedUnitPrice > 0) {
-          await db.execute({
-            sql: 'UPDATE parts SET unit_price = ?, current_price = ? WHERE id = ?',
-            args: [sanitizedUnitPrice, sanitizedUnitPrice, part_id]
-          });
-        }
-        
-        await db.execute({
-          sql: `
-            INSERT INTO transactions (part_id, transaction_type, quantity, price, notes, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          `,
-          args: [part_id, 'RECEIVE', sanitizedQuantity, sanitizedUnitPrice, location_bin || '', req.user.username]
-        });
-        
-        results.received.push({
-          part_number: part.part_number,
-          quantity: sanitizedQuantity,
-          unit_price: sanitizedUnitPrice
-        });
-        
-      } catch (rowError) {
-        console.error(`❌ Error processing row ${index + 1}:`, rowError.message);
-        results.errors.push({ row: index + 1, error: rowError.message });
-      }
-    }
-    
-    res.json({
-      success: true,
-      message: `Successfully received ${results.received.length} items`,
-      results
-    });
-    
-  } catch (error) {
-    console.error('❌ Receive error:', error);
-    res.status(500).json({ error: 'Failed to receive parts', details: error.message });
-  }
-});
-
-// ============================================================
-// 📋 REQUESTS ROUTES - Added
-// ============================================================
-
-// GET my requests
-app.get('/api/requests/my-requests', authenticateToken, async (req, res) => {
-  try {
-    console.log('📋 Fetching my requests for user:', req.user.username);
-    
-    const result = await db.execute({
-      sql: 'SELECT * FROM pending_issues WHERE requested_by_name = ? ORDER BY created_at DESC',
-      args: [req.user.username]
-    });
-    
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching my requests:', err.message);
-    res.json([]);
-  }
-});
-
-// GET issue requests
-app.get('/api/requests/issue', authenticateToken, async (req, res) => {
-  try {
-    console.log('📋 Fetching issue requests...');
-    
-    const result = await db.execute({
-      sql: 'SELECT * FROM pending_issues ORDER BY created_at DESC LIMIT 100',
-      args: []
-    });
-    
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching issue requests:', err.message);
-    res.json([]);
-  }
-});
-
-// ============================================================
 // IMPORT PARTS FROM EXCEL WITH AUTO-MAINTENANCE CREATION
 // ============================================================
 app.post('/api/parts/import', authenticateToken, async (req, res) => {
@@ -1056,31 +1578,6 @@ app.post('/api/parts/import', authenticateToken, async (req, res) => {
 // 📊 DASHBOARD ROUTES
 // ============================================================
 
-// GET pending requests count for dashboard
-app.get('/api/requests/pending', authenticateToken, async (req, res) => {
-  try {
-    console.log('📊 Fetching pending requests count...');
-    
-    const tableCheck = await db.execute(`
-      SELECT name FROM sqlite_master WHERE type='table' AND name='pending_issues'
-    `);
-    
-    let count = 0;
-    if (tableCheck.rows.length > 0) {
-      const result = await db.execute({
-        sql: 'SELECT COUNT(*) as count FROM pending_issues',
-        args: []
-      });
-      count = result.rows[0]?.count || 0;
-    }
-    console.log(`📊 Pending requests: ${count}`);
-    res.json({ count });
-  } catch (err) {
-    console.error('Error fetching pending requests:', err.message);
-    res.json({ count: 0 });
-  }
-});
-
 // GET low stock report for dashboard
 app.get('/api/reports/low-stock', authenticateToken, async (req, res) => {
   try {
@@ -1093,42 +1590,6 @@ app.get('/api/reports/low-stock', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching low stock:', err.message);
-    res.json([]);
-  }
-});
-
-// GET parts count for dashboard
-app.get('/api/parts/count', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: 'SELECT COUNT(*) as count FROM parts',
-      args: []
-    });
-    res.json({ count: result.rows[0]?.count || 0 });
-  } catch (err) {
-    console.error('Error fetching parts count:', err.message);
-    res.json({ count: 0 });
-  }
-});
-
-// GET all requests (with optional status filter)
-app.get('/api/requests', authenticateToken, async (req, res) => {
-  try {
-    const { status } = req.query;
-    let sql = 'SELECT * FROM pending_issues';
-    const args = [];
-
-    if (status) {
-      sql += ' WHERE status = ?';
-      args.push(status);
-    }
-
-    sql += ' ORDER BY created_at DESC';
-
-    const result = await db.execute({ sql, args });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching requests:', err.message);
     res.json([]);
   }
 });
@@ -1158,6 +1619,28 @@ app.get('/api/maintenance/overdue', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching overdue maintenance:', err.message);
     res.json({ count: 0 });
+  }
+});
+
+// GET all requests
+app.get('/api/requests', authenticateToken, async (req, res) => {
+  try {
+    const { status } = req.query;
+    let sql = 'SELECT * FROM pending_issues';
+    const args = [];
+
+    if (status) {
+      sql += ' WHERE status = ?';
+      args.push(status);
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const result = await db.execute({ sql, args });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching requests:', err.message);
+    res.json([]);
   }
 });
 
@@ -2545,6 +3028,7 @@ app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) 
 // ============================================================
 // SERVICE HISTORY REPORT ENDPOINTS
 // ============================================================
+
 app.get('/api/service-history/all', authenticateToken, async (req, res) => {
   try {
     const { startDate, endDate, equipmentName, technician, category } = req.query;
@@ -2661,48 +3145,6 @@ app.get('/api/service-history/stats', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// PARTS CRUD ROUTES
-// ============================================================
-
-// GET ALL PARTS
-app.get('/api/parts', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute('SELECT * FROM parts ORDER BY part_number');
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching parts:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET PART BY ID
-app.get('/api/parts/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`📦 Fetching part with ID: ${id}`);
-    
-    const partId = parseInt(id);
-    if (isNaN(partId)) {
-      return res.status(400).json({ error: 'Invalid part ID' });
-    }
-    
-    const result = await db.execute({
-      sql: 'SELECT * FROM parts WHERE id = ?',
-      args: [partId]
-    });
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-    
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error fetching part:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
 // HEALTH CHECK
 // ============================================================
 app.get('/api/health', (req, res) => {
@@ -2787,37 +3229,35 @@ const startServer = async () => {
       console.log(`   storekeeper / keeper123 (Storekeeper)`);
       console.log(`\n🧪 Test Route:`);
       console.log(`   GET /api/test - Check if server is running`);
+      console.log(`\n📦 Parts API:`);
+      console.log(`   GET /api/parts - Get all parts`);
+      console.log(`   GET /api/parts/:id - Get part by ID`);
+      console.log(`   POST /api/parts - Add new part`);
+      console.log(`   PUT /api/parts/:id - Update part`);
+      console.log(`   DELETE /api/parts/:id - Delete part`);
       console.log(`\n💰 Price History API:`);
-      console.log(`   GET /api/price-history/:partId - Get last 10 price changes`);
-      console.log(`   POST /api/price-history - Add price record and update current price`);
-      console.log(`   PUT /api/parts/:partId/price - Update price (React frontend)`);
-      console.log(`\n📥 Receive Parts API:`);
-      console.log(`   POST /api/receive-parts - Receive parts with price tracking`);
-      console.log(`   GET /api/receive-history - View receive history`);
-      console.log(`\n📊 Dashboard API:`);
-      console.log(`   GET /api/requests/pending - Pending requests count`);
-      console.log(`   GET /api/reports/low-stock - Low stock report`);
-      console.log(`   GET /api/parts/count - Total parts count`);
-      console.log(`   GET /api/maintenance/count - Maintenance count`);
-      console.log(`   GET /api/maintenance/overdue - Overdue maintenance`);
-      console.log(`\n📋 Transactions API:`);
-      console.log(`   GET /api/transactions - Get all transactions`);
-      console.log(`   GET /api/transactions/receive - Get receive transactions`);
-      console.log(`   GET /api/transactions/issue - Get issue transactions`);
+      console.log(`   GET /api/price-history/:partId - Get price history`);
+      console.log(`   POST /api/price-history - Add price record`);
+      console.log(`   PUT /api/parts/:partId/price - Update price`);
+      console.log(`\n📥 Receive API:`);
+      console.log(`   POST /api/receive - Receive part`);
+      console.log(`   POST /api/receive-parts - Bulk receive parts`);
+      console.log(`   GET /api/receive-history - Get receive history`);
+      console.log(`\n📤 Issue API:`);
+      console.log(`   POST /api/issue - Issue part`);
+      console.log(`\n📋 Approvals API:`);
+      console.log(`   GET /api/approvals/pending - Get pending approvals`);
+      console.log(`   PUT /api/approvals/:id/approve - Approve request`);
+      console.log(`   PUT /api/approvals/:id/reject - Reject request`);
       console.log(`\n📋 Requests API:`);
       console.log(`   GET /api/requests/my-requests - My requests`);
       console.log(`   GET /api/requests/issue - Issue requests`);
-      console.log(`\n📥 Import API:`);
-      console.log(`   POST /api/parts/import - Import parts from Excel`);
-      console.log(`\n🔧 Maintenance History API:`);
-      console.log(`   GET /api/gse-maintenance/:id/history - Get maintenance history (FIXED)`);
-      console.log(`   GET /api/debug/maintenance - Debug maintenance equipment`);
-      console.log(`   GET /api/maintenance/all - Get all maintenance for dropdown`);
-      console.log(`\n🛠️ Service Recording:`);
-      console.log(`   POST /api/gse-maintenance/:id/service - Record service (saves to service_history)`);
-      console.log(`\n🐛 Debug Routes:`);
-      console.log(`   GET /api/debug/service-history - Check service_history table`);
-      console.log(`   GET /api/debug/raw-history/:id - Check raw history for equipment`);
+      console.log(`\n📊 Dashboard API:`);
+      console.log(`   GET /api/reports/low-stock - Low stock report`);
+      console.log(`\n🔧 Maintenance API:`);
+      console.log(`   GET /api/gse-maintenance - Get all maintenance`);
+      console.log(`   GET /api/gse-maintenance/:id/history - Get maintenance history`);
+      console.log(`   POST /api/gse-maintenance/:id/service - Record service`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
