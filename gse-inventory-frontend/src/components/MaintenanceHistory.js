@@ -44,7 +44,6 @@ const MaintenanceHistory = ({ token }) => {
       setError('');
       console.log(`📊 Fetching history for equipment ID: ${equipmentId}`);
       
-      // Fetch up to 50 records to ensure we have at least 20
       const response = await axios.get(`${API_URL}/api/gse-maintenance/${equipmentId}/history?limit=50`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -73,14 +72,12 @@ const MaintenanceHistory = ({ token }) => {
         }
       }
       
-      // Sort history by service date (newest first)
       historyData.sort((a, b) => {
         const dateA = new Date(a.service_date || a.created_at || 0);
         const dateB = new Date(b.service_date || b.created_at || 0);
         return dateB - dateA;
       });
       
-      // Keep only the last 20 services
       historyData = historyData.slice(0, 20);
       
       setHistory(historyData);
@@ -132,7 +129,8 @@ const MaintenanceHistory = ({ token }) => {
         bg: '#e9ecef',
         color: '#6c757d',
         text: 'Not specified',
-        border: '#ced4da'
+        border: '#ced4da',
+        icon: '📋'
       };
     }
     const cat = category.toLowerCase();
@@ -140,22 +138,25 @@ const MaintenanceHistory = ({ token }) => {
       return {
         bg: '#e8f5e9',
         color: '#2e7d32',
-        text: '🛡️ Preventive',
-        border: '#a5d6a7'
+        text: 'Preventive',
+        border: '#a5d6a7',
+        icon: '🛡️'
       };
     } else if (cat === 'corrective') {
       return {
         bg: '#fce4ec',
         color: '#c62828',
-        text: '🔧 Corrective',
-        border: '#ef9a9a'
+        text: 'Corrective',
+        border: '#ef9a9a',
+        icon: '🔧'
       };
     }
     return {
       bg: '#e9ecef',
       color: '#6c757d',
       text: category || 'Unknown',
-      border: '#ced4da'
+      border: '#ced4da',
+      icon: '📋'
     };
   };
 
@@ -194,7 +195,7 @@ const MaintenanceHistory = ({ token }) => {
   };
 
   // ============================================================
-  // EXPORT TO EXCEL - Full Equipment History
+  // EXPORT TO EXCEL
   // ============================================================
   const exportToExcel = () => {
     if (history.length === 0) {
@@ -223,7 +224,7 @@ const MaintenanceHistory = ({ token }) => {
       ws['!cols'] = [
         { wch: 5 },   // #
         { wch: 20 },  // Service Date
-        { wch: 30 },  // Service Performed
+        { wch: 35 },  // Service Performed
         { wch: 20 },  // Technician
         { wch: 15 },  // Category
         { wch: 15 },  // Hours at Service
@@ -245,9 +246,6 @@ const MaintenanceHistory = ({ token }) => {
     }
   };
 
-  // ============================================================
-  // EXPORT TO EXCEL - All Equipment History
-  // ============================================================
   const exportAllToExcel = async () => {
     try {
       setExportLoading(true);
@@ -284,7 +282,7 @@ const MaintenanceHistory = ({ token }) => {
         { wch: 15 },  // Type
         { wch: 15 },  // Status
         { wch: 20 },  // Service Date
-        { wch: 30 },  // Service Performed
+        { wch: 35 },  // Service Performed
         { wch: 20 },  // Technician
         { wch: 15 },  // Category
         { wch: 10 },  // Hours
@@ -304,9 +302,6 @@ const MaintenanceHistory = ({ token }) => {
     }
   };
 
-  // ============================================================
-  // EXPORT TO CSV
-  // ============================================================
   const exportCSV = () => {
     if (history.length === 0) {
       alert('No history data to export');
@@ -407,7 +402,7 @@ const MaintenanceHistory = ({ token }) => {
       {loading && <div className="loading">Loading...</div>}
 
       {/* ============================================================
-          MAIN TABLE - Equipment List with All Columns
+          MAIN TABLE - Equipment List with Category Badges
           ============================================================ */}
       <div className="equipment-list">
         <table className="maintenance-table">
@@ -454,7 +449,7 @@ const MaintenanceHistory = ({ token }) => {
                       fontWeight: 'bold',
                       display: 'inline-block'
                     }}>
-                      {categoryBadge.text}
+                      {categoryBadge.icon} {categoryBadge.text}
                     </span>
                   </td>
                   <td>
@@ -482,7 +477,7 @@ const MaintenanceHistory = ({ token }) => {
       </div>
 
       {/* ============================================================
-          HISTORY MODAL - Shows when View History is clicked
+          HISTORY MODAL
           ============================================================ */}
       {showHistoryModal && selectedEquipment && (
         <div style={{
@@ -578,7 +573,7 @@ const MaintenanceHistory = ({ token }) => {
               marginBottom: '20px',
               border: '1px solid #e9ecef',
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
               gap: '10px'
             }}>
               <div>
@@ -599,12 +594,14 @@ const MaintenanceHistory = ({ token }) => {
                   {getStatusBadge(selectedEquipment.status)}
                 </span>
               </div>
-              <div>
-                <span style={{ fontSize: '12px', color: '#666' }}>Category:</span>
-                <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                  {selectedEquipment.maintenance_category || selectedEquipment.category || 'Not specified'}
-                </span>
-              </div>
+              {selectedEquipment.current_hours !== undefined && (
+                <div>
+                  <span style={{ fontSize: '12px', color: '#666' }}>Hours:</span>
+                  <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
+                    {selectedEquipment.current_hours} / {selectedEquipment.target_hours || 'N/A'}
+                  </span>
+                </div>
+              )}
               {selectedEquipment.last_service_date && (
                 <div>
                   <span style={{ fontSize: '12px', color: '#666' }}>Last Service:</span>
@@ -624,13 +621,13 @@ const MaintenanceHistory = ({ token }) => {
               <div>
                 <span style={{ fontSize: '12px', color: '#666' }}>Total Services:</span>
                 <span style={{ fontWeight: 'bold', marginLeft: '5px', color: '#27ae60' }}>
-                  {history.length} (showing last 20)
+                  {history.length}
                 </span>
               </div>
             </div>
 
             {/* ============================================================
-                SERVICE HISTORY TABLE - Shows last 20 services
+                SERVICE HISTORY TABLE - With Enhanced Service Performed
                 ============================================================ */}
             {history.length === 0 ? (
               <div style={{
@@ -659,7 +656,15 @@ const MaintenanceHistory = ({ token }) => {
                     <tr style={{ backgroundColor: '#2c3e50', color: 'white' }}>
                       <th style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>#</th>
                       <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Service Date</th>
-                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Service Performed</th>
+                      <th style={{ 
+                        padding: '10px', 
+                        textAlign: 'left', 
+                        border: '1px solid #ddd',
+                        minWidth: '200px',
+                        backgroundColor: '#1a5276'
+                      }}>
+                        🔧 Service Performed
+                      </th>
                       <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Technician</th>
                       <th style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>Category</th>
                       <th style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>Hours</th>
@@ -679,7 +684,12 @@ const MaintenanceHistory = ({ token }) => {
                           <td style={{ padding: '8px', border: '1px solid #ddd' }}>
                             {h.service_date ? formatFullDate(h.service_date) : 'N/A'}
                           </td>
-                          <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                          <td style={{ 
+                            padding: '8px', 
+                            border: '1px solid #ddd',
+                            fontWeight: '600',
+                            color: '#1a5276'
+                          }}>
                             {h.service_performed || 'Maintenance recorded'}
                           </td>
                           <td style={{ padding: '8px', border: '1px solid #ddd' }}>
@@ -696,13 +706,13 @@ const MaintenanceHistory = ({ token }) => {
                               fontWeight: 'bold',
                               display: 'inline-block'
                             }}>
-                              {categoryBadge.text}
+                              {categoryBadge.icon} {categoryBadge.text}
                             </span>
                           </td>
                           <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>
                             {h.hours_at_service || h.current_hours || 0}
                           </td>
-                          <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                          <td style={{ padding: '8px', border: '1px solid #ddd', maxWidth: '200px', wordBreak: 'break-word' }}>
                             {h.notes || '-'}
                           </td>
                         </tr>
@@ -712,7 +722,7 @@ const MaintenanceHistory = ({ token }) => {
                   <tfoot>
                     <tr style={{ backgroundColor: '#f8f9fa', fontWeight: 'bold' }}>
                       <td colSpan="7" style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>
-                        Showing {history.length} of {history.length} service records
+                        Showing {history.length} service record{history.length !== 1 ? 's' : ''}
                       </td>
                     </tr>
                   </tfoot>
