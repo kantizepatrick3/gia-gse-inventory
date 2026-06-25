@@ -9,6 +9,15 @@ const PartsList = ({ token, user }) => {
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingPart, setEditingPart] = useState(null);
   const [selectedPart, setSelectedPart] = useState(null);
+  const [showPriceModal, setShowPriceModal] = useState(false);
+  const [priceData, setPriceData] = useState({
+    price: '',
+    quantity: 1,
+    transaction_type: 'MANUAL',
+    notes: ''
+  });
+  const [priceHistory, setPriceHistory] = useState([]);
+  const [showPriceHistory, setShowPriceHistory] = useState(false);
   const [newPart, setNewPart] = useState({
     part_number: '',
     description: '',
@@ -119,6 +128,83 @@ const PartsList = ({ token, user }) => {
     }
   };
 
+  // ============================================================
+  // PRICE HISTORY FUNCTIONS
+  // ============================================================
+  
+  const fetchPriceHistory = async (partId) => {
+    try {
+      const response = await axios.get(`${API_URL}/api/price-history/${partId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPriceHistory(response.data || []);
+      setShowPriceHistory(true);
+    } catch (err) {
+      console.error('Error fetching price history:', err);
+      setError('Failed to load price history');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  const handleUpdatePrice = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        part_id: selectedPart.id,
+        price: parseFloat(priceData.price),
+        quantity: parseInt(priceData.quantity) || 1,
+        transaction_type: priceData.transaction_type || 'MANUAL',
+        notes: priceData.notes || ''
+      };
+
+      await axios.post(`${API_URL}/api/price-history`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      setMessage(`✓ Price updated for ${selectedPart.part_number}!`);
+      setShowPriceModal(false);
+      setSelectedPart(null);
+      setPriceData({
+        price: '',
+        quantity: 1,
+        transaction_type: 'MANUAL',
+        notes: ''
+      });
+      await fetchParts();
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      console.error('Error updating price:', err);
+      setError(err.response?.data?.error || 'Failed to update price');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  const openPriceModal = (part) => {
+    setSelectedPart(part);
+    setPriceData({
+      price: part.current_price || part.unit_price || 0,
+      quantity: 1,
+      transaction_type: 'MANUAL',
+      notes: ''
+    });
+    setShowPriceModal(true);
+  };
+
+  const formatPrice = (price) => {
+    return `$${parseFloat(price || 0).toFixed(2)}`;
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   const handleManualRefresh = async () => {
     setRefreshing(true);
     await fetchParts();
@@ -216,7 +302,7 @@ const PartsList = ({ token, user }) => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-        <h2>Parts Catalog</h2>
+        <h2>📦 Parts Catalog</h2>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button 
             onClick={handleManualRefresh} 
@@ -407,8 +493,8 @@ const PartsList = ({ token, user }) => {
               <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Manufacturer</th>
               <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Location</th>
               <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Stock</th>
+              <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Current Price</th>
               <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Min</th>
-              <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Contact</th>
               <th style={{ border: '1px solid #ddd', padding: '12px', textAlign: 'left' }}>Actions</th>
             </tr>
           </thead>
@@ -423,13 +509,42 @@ const PartsList = ({ token, user }) => {
                 <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold', color: part.quantity_on_hand <= part.min_stock ? '#dc3545' : '#28a745' }}>
                   {part.quantity_on_hand}
                 </td>
+                <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold', color: '#1976d2' }}>
+                  ${parseFloat(part.current_price || part.unit_price || 0).toFixed(2)}
+                </td>
                 <td style={{ border: '1px solid #ddd', padding: '8px' }}>{part.min_stock}</td>
                 <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                  <button onClick={() => showContactDetails(part)} style={{ backgroundColor: '#3498db', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', cursor: 'pointer' }}>
-                    📞 View
+                  <button 
+                    onClick={() => openPriceModal(part)} 
+                    style={{ 
+                      backgroundColor: '#ffc107', 
+                      color: '#333', 
+                      border: 'none', 
+                      padding: '5px 10px', 
+                      borderRadius: '3px', 
+                      marginRight: '5px',
+                      cursor: 'pointer' 
+                    }}
+                  >
+                    💰 Price
                   </button>
-                </td>
-                <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                  <button 
+                    onClick={() => fetchPriceHistory(part.id)} 
+                    style={{ 
+                      backgroundColor: '#9b59b6', 
+                      color: 'white', 
+                      border: 'none', 
+                      padding: '5px 10px', 
+                      borderRadius: '3px', 
+                      marginRight: '5px',
+                      cursor: 'pointer' 
+                    }}
+                  >
+                    📊 History
+                  </button>
+                  <button onClick={() => showContactDetails(part)} style={{ backgroundColor: '#3498db', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>
+                    📞 Contact
+                  </button>
                   <button onClick={() => openEditForm(part)} style={{ backgroundColor: '#f39c12', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>
                     ✏️ Edit
                   </button>
@@ -446,7 +561,7 @@ const PartsList = ({ token, user }) => {
       </div>
 
       {/* Contact Details Modal */}
-      {selectedPart && (
+      {selectedPart && !showPriceModal && !showPriceHistory && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -483,7 +598,169 @@ const PartsList = ({ token, user }) => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal - NO WARNING MESSAGE */}
+      {/* Price Update Modal */}
+      {showPriceModal && selectedPart && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '30px',
+            borderRadius: '8px',
+            maxWidth: '450px',
+            width: '90%'
+          }}>
+            <h3>💰 Update Price</h3>
+            <p><strong>Part:</strong> {selectedPart.part_number} - {selectedPart.description}</p>
+            <p><strong>Current Price:</strong> ${parseFloat(selectedPart.current_price || selectedPart.unit_price || 0).toFixed(2)}</p>
+            <hr />
+            <form onSubmit={handleUpdatePrice}>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>New Price ($) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={priceData.price}
+                  onChange={(e) => setPriceData({ ...priceData, price: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Quantity</label>
+                <input
+                  type="number"
+                  value={priceData.quantity}
+                  onChange={(e) => setPriceData({ ...priceData, quantity: parseInt(e.target.value) || 1 })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Transaction Type</label>
+                <select
+                  value={priceData.transaction_type}
+                  onChange={(e) => setPriceData({ ...priceData, transaction_type: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                >
+                  <option value="MANUAL">Manual</option>
+                  <option value="RECEIVE">Receive</option>
+                  <option value="ISSUE">Issue</option>
+                  <option value="ADJUSTMENT">Adjustment</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Notes</label>
+                <input
+                  type="text"
+                  value={priceData.notes}
+                  onChange={(e) => setPriceData({ ...priceData, notes: e.target.value })}
+                  placeholder="Reason for price change"
+                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button type="submit" style={{ flex: 1, backgroundColor: '#2196f3', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}>
+                  Update Price
+                </button>
+                <button type="button" onClick={() => { setShowPriceModal(false); setSelectedPart(null); }} style={{ backgroundColor: '#95a5a6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Price History Modal */}
+      {showPriceHistory && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '30px',
+            borderRadius: '8px',
+            maxWidth: '800px',
+            width: '95%',
+            maxHeight: '80vh',
+            overflowY: 'auto'
+          }}>
+            <h3>📊 Price History</h3>
+            <p><strong>Part:</strong> {selectedPart?.part_number} - {selectedPart?.description}</p>
+            <hr />
+            {priceHistory.length === 0 ? (
+              <p style={{ textAlign: 'center', padding: '20px', color: '#666' }}>No price history available.</p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#f2f2f2' }}>
+                    <th style={{ border: '1px solid #ddd', padding: '8px' }}>#</th>
+                    <th style={{ border: '1px solid #ddd', padding: '8px' }}>Date</th>
+                    <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'right' }}>Price</th>
+                    <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>Quantity</th>
+                    <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>Type</th>
+                    <th style={{ border: '1px solid #ddd', padding: '8px' }}>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priceHistory.map((record, index) => (
+                    <tr key={record.id || index}>
+                      <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>{index + 1}</td>
+                      <td style={{ border: '1px solid #ddd', padding: '8px' }}>{formatDate(record.created_at)}</td>
+                      <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                        ${parseFloat(record.price).toFixed(2)}
+                      </td>
+                      <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>{record.quantity || 1}</td>
+                      <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>
+                        <span style={{
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: record.transaction_type === 'RECEIVE' ? '#d4edda' :
+                                        record.transaction_type === 'ISSUE' ? '#f8d7da' :
+                                        record.transaction_type === 'INITIAL' ? '#e3f2fd' : '#e9ecef',
+                          color: record.transaction_type === 'RECEIVE' ? '#155724' :
+                                 record.transaction_type === 'ISSUE' ? '#721c24' :
+                                 record.transaction_type === 'INITIAL' ? '#0d47a1' : '#6c757d',
+                          fontSize: '11px',
+                          fontWeight: 'bold'
+                        }}>
+                          {record.transaction_type || 'MANUAL'}
+                        </span>
+                      </td>
+                      <td style={{ border: '1px solid #ddd', padding: '8px' }}>{record.notes || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button onClick={() => { setShowPriceHistory(false); setSelectedPart(null); }} style={{ backgroundColor: '#95a5a6', color: 'white', border: 'none', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div style={{
           position: 'fixed',
