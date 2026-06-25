@@ -86,7 +86,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 // ============================================================
-// ⭐ PRICE HISTORY ROUTES - AT THE VERY TOP ⭐
+// ⭐ PRICE HISTORY ROUTES
 // ============================================================
 
 // GET PRICE HISTORY FOR A SPECIFIC PART
@@ -186,7 +186,91 @@ app.post('/api/price-history', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================
+// ⭐ PRICE UPDATE ROUTE - For React frontend (PUT)
+// ============================================================
+app.put('/api/parts/:partId/price', authenticateToken, async (req, res) => {
+  console.log('\n=== 🔄 PRICE UPDATE REQUEST ===');
+  console.log('Part ID:', req.params.partId);
+  console.log('New Price:', req.body.price);
+  console.log('Full body:', req.body);
+
+  try {
+    const { partId } = req.params;
+    const { price } = req.body;
+
+    // Validate input
+    if (price === undefined || price === null) {
+      return res.status(400).json({ error: 'Price is required' });
+    }
+
+    const newPrice = parseFloat(price);
+    if (isNaN(newPrice) || newPrice < 0) {
+      return res.status(400).json({ error: 'Invalid price value' });
+    }
+
+    // Check if part exists (try by part_number first, then by id)
+    let partResult;
+    
+    partResult = await db.execute({
+      sql: 'SELECT id, part_number, current_price, description FROM parts WHERE part_number = ?',
+      args: [partId]
+    });
+
+    if (partResult.rows.length === 0) {
+      partResult = await db.execute({
+        sql: 'SELECT id, part_number, current_price, description FROM parts WHERE id = ?',
+        args: [partId]
+      });
+    }
+
+    if (partResult.rows.length === 0) {
+      return res.status(404).json({ error: `Part ${partId} not found` });
+    }
+
+    const part = partResult.rows[0];
+    const oldPrice = part.current_price || 0;
+    const partIdNumber = part.id;
+
+    // Update the price in parts table
+    await db.execute({
+      sql: 'UPDATE parts SET current_price = ?, unit_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      args: [newPrice, newPrice, partIdNumber]
+    });
+
+    // Add to price history
+    await db.execute({
+      sql: `INSERT INTO price_history (part_id, price, transaction_type, notes, recorded_by, created_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      args: [partIdNumber, newPrice, 'PRICE_UPDATE', `Price updated from ${oldPrice} to ${newPrice} by ${req.user.username}`, req.user.username]
+    });
+
+    console.log('✅ Price updated successfully');
+    console.log(`   Part: ${part.part_number} - ${part.description}`);
+    console.log(`   Old price: ${oldPrice}`);
+    console.log(`   New price: ${newPrice}`);
+
+    res.json({
+      success: true,
+      message: `Price updated for ${part.part_number}`,
+      partId: part.part_number,
+      oldPrice: oldPrice,
+      newPrice: newPrice,
+      updatedAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating price:', error);
+    res.status(500).json({ 
+      error: 'Failed to update price',
+      details: error.message 
+    });
+  }
+});
+
+// ============================================================
 // TEST ROUTE - To verify server is running
+// ============================================================
 app.get('/api/test', (req, res) => {
   res.json({
     message: 'Server is running!',
@@ -195,7 +279,8 @@ app.get('/api/test', (req, res) => {
       priceHistory: '/api/price-history/:partId',
       fullPriceHistory: '/api/price-history/full/:partId',
       latestPrice: '/api/price-history/latest/:partId',
-      addPrice: '/api/price-history (POST)'
+      addPrice: '/api/price-history (POST)',
+      updatePrice: '/api/parts/:partId/price (PUT)'
     }
   });
 });
@@ -1636,6 +1721,7 @@ const startServer = async () => {
       console.log(`   GET /api/price-history/full/:partId - Get all price changes`);
       console.log(`   GET /api/price-history/latest/:partId - Get latest price`);
       console.log(`   POST /api/price-history - Add price record and update current price`);
+      console.log(`   PUT /api/parts/:partId/price - Update price (React frontend)`);
       console.log(`\n🔧 Maintenance Categories:`);
       console.log(`   Preventive - Updates next_service_date`);
       console.log(`   Corrective - Does NOT change next_service_date`);
