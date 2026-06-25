@@ -805,9 +805,7 @@ app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) =>
   }
 });
 
-// ============================================================
 // RECORD SERVICE - WITH PREVENTIVE VS CORRECTIVE HANDLING
-// ============================================================
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const {
@@ -1455,6 +1453,8 @@ app.get('/api/price-history/full/:partId', authenticateToken, async (req, res) =
 app.post('/api/price-history', authenticateToken, async (req, res) => {
   const { part_id, price, quantity, transaction_type, reference_number, notes } = req.body;
 
+  console.log('💰 Price update request received for part:', part_id);
+
   try {
     // Validate part exists
     const partResult = await db.execute({
@@ -1506,7 +1506,7 @@ app.post('/api/price-history', authenticateToken, async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Price history added successfully'
+      message: 'Price updated successfully'
     });
   } catch (err) {
     console.error('Error adding price history:', err.message);
@@ -1573,7 +1573,9 @@ app.get('/api/parts/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================
 // HEALTH CHECK
+// ============================================================
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'OK',
