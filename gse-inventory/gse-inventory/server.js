@@ -1435,6 +1435,54 @@ app.get('/api/health', (req, res) => {
 });
 
 // ============================================================
+// ONE-TIME FIX: Update NULL categories in service_history
+// ============================================================
+app.post('/api/fix-categories', authenticateToken, async (req, res) => {
+  try {
+    // Only admin can run this
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    console.log('🔧 Fixing NULL categories in service_history...');
+
+    // Check current NULL records
+    const checkResult = await db.execute(`
+      SELECT COUNT(*) as count FROM service_history 
+      WHERE maintenance_category IS NULL OR maintenance_category = ''
+    `);
+    const nullCount = checkResult.rows[0].count;
+    console.log(`📊 Found ${nullCount} records with NULL categories`);
+
+    // Update NULL categories to 'preventive'
+    await db.execute(`
+      UPDATE service_history 
+      SET maintenance_category = 'preventive' 
+      WHERE maintenance_category IS NULL OR maintenance_category = ''
+    `);
+
+    // Verify the update
+    const verifyResult = await db.execute(`
+      SELECT COUNT(*) as count FROM service_history 
+      WHERE maintenance_category IS NULL OR maintenance_category = ''
+    `);
+    const remaining = verifyResult.rows[0].count;
+
+    console.log(`✅ Updated ${nullCount} records. Remaining NULL: ${remaining}`);
+
+    res.json({
+      success: true,
+      message: `✅ Fixed ${nullCount} records. Remaining NULL: ${remaining}`,
+      fixedCount: nullCount,
+      remaining: remaining
+    });
+  } catch (err) {
+    console.error('❌ Error fixing categories:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // START SERVER
 // ============================================================
 const startServer = async () => {
@@ -1471,6 +1519,8 @@ const startServer = async () => {
       console.log(`\n🔧 Maintenance Categories:`);
       console.log(`   Preventive - Updates next_service_date`);
       console.log(`   Corrective - Does NOT change next_service_date`);
+      console.log(`\n🛠️ Fix Endpoint:`);
+      console.log(`   POST /api/fix-categories - Fix NULL categories (Admin only)`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
