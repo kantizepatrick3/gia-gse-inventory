@@ -59,7 +59,8 @@ const Dashboard = ({ token, user }) => {
       
       let pendingCount = 0;
       if (isApprover && results[3]) {
-        pendingCount = results[3].data.requests?.length || 0;
+        // FIX: Use .data.length directly (API returns array, not { requests: [...] })
+        pendingCount = results[3].data.length || 0;
       }
       
       setStats({
