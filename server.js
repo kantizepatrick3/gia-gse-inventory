@@ -381,6 +381,23 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
       args: [req.user.username, comment || 'Approved', requestId]
     });
 
+    // ADD TRANSACTION RECORD
+    await db.execute({
+      sql: `INSERT INTO transactions 
+            (part_id, transaction_type, quantity, gse_registration, technician_name, work_order, notes, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      args: [
+        request.part_id,
+        'ISSUE',
+        request.quantity,
+        request.gse_registration || '',
+        request.technician_name || '',
+        request.work_order || '',
+        `Approved request #${id} - ${comment || 'Approved'}`,
+        req.user.username
+      ]
+    });
+
     res.json({ success: true, message: 'Request approved successfully' });
   } catch (err) {
     console.error('Error approving request:', err.message);
@@ -725,17 +742,29 @@ app.put('/api/parts/:partId/price', authenticateToken, async (req, res) => {
 
 app.get('/api/transactions', authenticateToken, async (req, res) => {
   try {
-    const { limit = 100, offset = 0 } = req.query;
+    const { limit = 100, offset = 0, type } = req.query;
+    
+    let sql = `
+      SELECT t.*, p.part_number, p.description
+      FROM transactions t
+      LEFT JOIN parts p ON t.part_id = p.id
+    `;
+    
+    const args = [];
+    
+    if (type) {
+      sql += ` WHERE t.transaction_type = ?`;
+      args.push(type);
+    }
+    
+    sql += ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+    args.push(parseInt(limit), parseInt(offset));
+    
     const result = await db.execute({
-      sql: `
-        SELECT t.*, p.part_number, p.description
-        FROM transactions t
-        LEFT JOIN parts p ON t.part_id = p.id
-        ORDER BY t.created_at DESC
-        LIMIT ? OFFSET ?
-      `,
-      args: [parseInt(limit), parseInt(offset)]
+      sql: sql,
+      args: args
     });
+    
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching transactions:', err.message);
@@ -779,6 +808,31 @@ app.get('/api/transactions/issue', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching issue transactions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get transaction by ID
+app.get('/api/transactions/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.execute({
+      sql: `
+        SELECT t.*, p.part_number, p.description
+        FROM transactions t
+        LEFT JOIN parts p ON t.part_id = p.id
+        WHERE t.id = ?
+      `,
+      args: [id]
+    });
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching transaction:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -842,10 +896,6 @@ app.get('/api/requests/pending/count', authenticateToken, async (req, res) => {
   }
 });
 
-// ============================================================
-// 📊 DASHBOARD STATS - FIXED
-// ============================================================
-
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
     console.log('📊 Fetching dashboard stats...');
@@ -891,6 +941,31 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
   }
 });
 
+// GET single maintenance record by ID - FIXED: Added this endpoint
+app.get('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.execute({
+      sql: `
+        SELECT gm.*, p.part_number, p.description as part_description
+        FROM gse_maintenance gm
+        LEFT JOIN parts p ON gm.part_id = p.id
+        WHERE gm.id = ?
+      `,
+      args: [id]
+    });
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Maintenance record not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching maintenance record:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -924,6 +999,93 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     const { id } = req.params;
     const { service_performed, technician_name, notes, service_date, current_hours, maintenance_category } = req.body;
 
+    // Get the maintenance record
+    const maintenanceResult = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (maintenanceResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Maintenance record not found' });
+    }
+
+    const maintenance = maintenanceResult.rows[0];
+    const serviceDate = service_date || new Date().toISOString().split('T')[0];
+    const hours = current_hours ? parseInt(current_hours) : (maintenance.current_hours || 0);
+
+    // Calculate next service values
+    let nextServiceDate = null;
+    let nextServiceHours = 0;
+    let daysRemaining = 0;
+    let hoursRemaining = 0;
+    let status = 'serviced';
+
+    // Calculate based on maintenance type
+    if (maintenance.maintenance_type === 'hour') {
+      const intervalHours = parseInt(maintenance.service_interval_hours) || 0;
+      if (intervalHours > 0) {
+        nextServiceHours = hours + intervalHours;
+        hoursRemaining = intervalHours;
+      }
+      
+      const intervalMonths = parseInt(maintenance.service_interval_months) || 0;
+      if (intervalMonths > 0) {
+        const date = new Date(serviceDate);
+        date.setMonth(date.getMonth() + intervalMonths);
+        nextServiceDate = date.toISOString().split('T')[0];
+        
+        const today = new Date();
+        const nextDate = new Date(nextServiceDate);
+        const diffTime = nextDate - today;
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      }
+      
+      if (hoursRemaining <= 0 && nextServiceHours > 0) {
+        status = 'overdue';
+      } else if (hoursRemaining <= 50 && hoursRemaining > 0) {
+        status = 'due_soon';
+      }
+      
+    } else if (maintenance.maintenance_type === 'month') {
+      const intervalMonths = parseInt(maintenance.service_interval_months) || 0;
+      if (intervalMonths > 0) {
+        const date = new Date(serviceDate);
+        date.setMonth(date.getMonth() + intervalMonths);
+        nextServiceDate = date.toISOString().split('T')[0];
+        
+        const today = new Date();
+        const nextDate = new Date(nextServiceDate);
+        const diffTime = nextDate - today;
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        if (daysRemaining <= 0) {
+          status = 'overdue';
+        } else if (daysRemaining <= 30) {
+          status = 'due_soon';
+        }
+      }
+      
+    } else if (maintenance.maintenance_type === 'year') {
+      const intervalYears = parseInt(maintenance.service_interval_years) || 0;
+      if (intervalYears > 0) {
+        const date = new Date(serviceDate);
+        date.setFullYear(date.getFullYear() + intervalYears);
+        nextServiceDate = date.toISOString().split('T')[0];
+        
+        const today = new Date();
+        const nextDate = new Date(nextServiceDate);
+        const diffTime = nextDate - today;
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        if (daysRemaining <= 0) {
+          status = 'overdue';
+        } else if (daysRemaining <= 60) {
+          status = 'due_soon';
+        }
+      }
+    }
+
+    // Insert into service history - FIXED: use the actual maintenance data
     await db.execute({
       sql: `
         INSERT INTO service_history (
@@ -933,18 +1095,57 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       `,
       args: [
-        id, '', '', '', service_date || new Date().toISOString().split('T')[0],
-        service_performed || '', technician_name || '', notes || '',
-        maintenance_category || 'preventive', current_hours || 0, req.user.username
+        parseInt(id),
+        maintenance.equipment_name || '',
+        maintenance.equipment_type || '',
+        maintenance.maintenance_type || 'none',
+        serviceDate,
+        service_performed || '',
+        technician_name || '',
+        notes || '',
+        maintenance_category || 'preventive',
+        hours,
+        req.user.username
       ]
     });
 
+    // Update maintenance record with calculated values
     await db.execute({
-      sql: `UPDATE gse_maintenance SET last_service_date = ?, current_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      args: [service_date || new Date().toISOString().split('T')[0], current_hours || 0, id]
+      sql: `
+        UPDATE gse_maintenance SET 
+          last_service_date = ?,
+          current_hours = ?,
+          next_service_date = ?,
+          next_service_hours = ?,
+          hours_remaining = ?,
+          days_remaining = ?,
+          status = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [
+        serviceDate,
+        hours,
+        nextServiceDate,
+        nextServiceHours,
+        hoursRemaining,
+        daysRemaining,
+        status,
+        id
+      ]
     });
 
-    res.json({ success: true, message: 'Service recorded successfully' });
+    res.json({
+      success: true,
+      message: 'Service recorded successfully',
+      data: {
+        next_service_date: nextServiceDate,
+        next_service_hours: nextServiceHours,
+        days_remaining: daysRemaining,
+        hours_remaining: hoursRemaining,
+        status: status
+      }
+    });
   } catch (err) {
     console.error('Error recording service:', err.message);
     res.status(500).json({ error: 'Failed to record service', details: err.message });
