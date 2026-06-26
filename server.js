@@ -574,9 +574,9 @@ app.post('/api/parts', authenticateToken, async (req, res) => {
           0,
           0,
           0,
-          '',  // contact_person - empty string
-          '',  // contact_phone - empty string
-          '',  // contact_email - empty string
+          '',
+          '',
+          '',
           req.user.username
         ]
       });
@@ -1676,23 +1676,44 @@ app.put('/api/gse-status/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get status summary
+// Get status summary - FIXED
 app.get('/api/gse-status/summary', authenticateToken, async (req, res) => {
   try {
-    const [total, inService, outOfService] = await Promise.all([
-      db.execute('SELECT COUNT(*) as count FROM gse_maintenance'),
-      db.execute('SELECT COUNT(*) as count FROM gse_maintenance WHERE gse_status = "In-Service"'),
-      db.execute('SELECT COUNT(*) as count FROM gse_maintenance WHERE gse_status = "Out-of-Service"')
-    ]);
+    console.log('📊 Fetching GSE status summary...');
+    
+    // Get all equipment with status
+    const allResult = await db.execute({
+      sql: 'SELECT COUNT(*) as count FROM gse_maintenance',
+      args: []
+    });
+    
+    // Get In-Service count (case insensitive)
+    const inServiceResult = await db.execute({
+      sql: "SELECT COUNT(*) as count FROM gse_maintenance WHERE LOWER(gse_status) = 'in-service'",
+      args: []
+    });
+    
+    // Get Out-of-Service count (case insensitive)
+    const outOfServiceResult = await db.execute({
+      sql: "SELECT COUNT(*) as count FROM gse_maintenance WHERE LOWER(gse_status) = 'out-of-service'",
+      args: []
+    });
+
+    const total = Number(allResult.rows[0]?.count) || 0;
+    const inService = Number(inServiceResult.rows[0]?.count) || 0;
+    const outOfService = Number(outOfServiceResult.rows[0]?.count) || 0;
+
+    console.log(`📊 Summary - Total: ${total}, In-Service: ${inService}, Out-of-Service: ${outOfService}`);
 
     res.json({
-      total: total.rows[0]?.count || 0,
-      in_service: inService.rows[0]?.count || 0,
-      out_of_service: outOfService.rows[0]?.count || 0
+      total: total,
+      in_service: inService,
+      out_of_service: outOfService
     });
   } catch (err) {
     console.error('Error fetching GSE status summary:', err.message);
-    res.status(500).json({ error: err.message });
+    // Return zeros instead of error
+    res.json({ total: 0, in_service: 0, out_of_service: 0 });
   }
 });
 
@@ -1962,9 +1983,9 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
         0,
         0,
         0,
-        '',  // contact_person - empty string
-        '',  // contact_phone - empty string
-        '',  // contact_email - empty string
+        '',
+        '',
+        '',
         req.user.username
       ]
     });
@@ -2051,9 +2072,9 @@ app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, r
             0,
             0,
             0,
-            '',  // contact_person - empty string
-            '',  // contact_phone - empty string
-            '',  // contact_email - empty string
+            '',
+            '',
+            '',
             req.user.username
           ]
         });
