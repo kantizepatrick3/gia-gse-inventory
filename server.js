@@ -574,9 +574,9 @@ app.post('/api/parts', authenticateToken, async (req, res) => {
           0,
           0,
           0,
-          NULL,
-          NULL,
-          NULL,
+          '',  // contact_person - empty string
+          '',  // contact_phone - empty string
+          '',  // contact_email - empty string
           req.user.username
         ]
       });
@@ -1962,9 +1962,9 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
         0,
         0,
         0,
-        NULL,
-        NULL,
-        NULL,
+        '',  // contact_person - empty string
+        '',  // contact_phone - empty string
+        '',  // contact_email - empty string
         req.user.username
       ]
     });
@@ -2051,9 +2051,9 @@ app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, r
             0,
             0,
             0,
-            NULL,
-            NULL,
-            NULL,
+            '',  // contact_person - empty string
+            '',  // contact_phone - empty string
+            '',  // contact_email - empty string
             req.user.username
           ]
         });
