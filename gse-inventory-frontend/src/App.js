@@ -11,7 +11,8 @@ import Reports from './components/Reports';
 import Users from './components/Users';
 import GSEMaintenance from './components/GSEMaintenance';
 import MaintenanceHistory from './components/MaintenanceHistory';
-import PriceHistory from './components/PriceHistory'; // ✅ ADD THIS IMPORT
+import PriceHistory from './components/PriceHistory';
+import GSEStatus from './components/GSEStatus'; // NEW: Import GSE Status component
 import Navbar from './components/Navbar';
 import './App.css';
 
@@ -54,7 +55,8 @@ function App() {
             <Route path="/users" element={<Users token={token} user={user} />} />
             <Route path="/maintenance" element={<GSEMaintenance token={token} user={user} />} />
             <Route path="/maintenance-history" element={<MaintenanceHistory token={token} />} />
-            <Route path="/price-history" element={<PriceHistory token={token} />} /> {/* ✅ ADD THIS ROUTE */}
+            <Route path="/price-history" element={<PriceHistory token={token} />} />
+            <Route path="/gse-status" element={<GSEStatus token={token} user={user} />} /> {/* NEW: GSE Status Route */}
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </div>
