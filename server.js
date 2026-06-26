@@ -1013,7 +1013,7 @@ app.get('/api/maintenance/all', authenticateToken, async (req, res) => {
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { service_performed, technician_name, notes, service_date, current_hours, maintenance_category } = req.body;
+    const { service_performed, technician_name, notes, service_date, current_hours, maintenance_category, months_interval, service_interval_years, target_hours } = req.body;
 
     // Get the maintenance record
     const maintenanceResult = await db.execute({
@@ -1038,28 +1038,20 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     let nextServiceYear = null;
     let status = 'serviced';
 
-    // Get intervals with proper parsing
+    // Get intervals - prioritize manual values from request
     let intervalHours = parseInt(maintenance.service_interval_hours) || 0;
-    let intervalMonths = parseInt(maintenance.service_interval_months) || 0;
-    let intervalYears = parseInt(maintenance.service_interval_years) || 0;
-
-    // If interval is stored as string, try to extract number
-    if (isNaN(intervalMonths) && maintenance.service_interval_months) {
-      const match = String(maintenance.service_interval_months).match(/\d+/);
-      if (match) intervalMonths = parseInt(match[0]) || 0;
-    }
-    if (isNaN(intervalYears) && maintenance.service_interval_years) {
-      const match = String(maintenance.service_interval_years).match(/\d+/);
-      if (match) intervalYears = parseInt(match[0]) || 0;
-    }
+    let intervalMonths = parseInt(months_interval) || parseInt(maintenance.service_interval_months) || 0;
+    let intervalYears = parseInt(service_interval_years) || parseInt(maintenance.service_interval_years) || 0;
+    let targetHrs = parseInt(target_hours) || parseInt(maintenance.target_hours) || intervalHours;
 
     // ============================================================
     // HOUR-BASED MAINTENANCE
     // ============================================================
     if (maintType === 'hour') {
-      if (intervalHours > 0) {
-        nextServiceHours = hours + intervalHours;
-        hoursRemaining = intervalHours;
+      if (intervalHours > 0 || targetHrs > 0) {
+        const effectiveTarget = targetHrs > 0 ? targetHrs : intervalHours;
+        nextServiceHours = hours + effectiveTarget;
+        hoursRemaining = effectiveTarget;
       }
       
       if (intervalMonths > 0) {
@@ -1149,34 +1141,70 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       ]
     });
 
-    // Update maintenance record with calculated values
+    // ============================================================
+    // BUILD DYNAMIC UPDATE QUERY - THIS IS THE FIX
+    // ============================================================
+    let updateFields = [];
+    let updateArgs = [];
+
+    // Always update these fields
+    updateFields.push('last_service_date = ?');
+    updateArgs.push(serviceDate);
+
+    updateFields.push('current_hours = ?');
+    updateArgs.push(hours);
+
+    updateFields.push('next_service_date = ?');
+    updateArgs.push(nextServiceDate);
+
+    updateFields.push('next_service_hours = ?');
+    updateArgs.push(nextServiceHours);
+
+    updateFields.push('next_service_year = ?');
+    updateArgs.push(nextServiceYear);
+
+    updateFields.push('hours_remaining = ?');
+    updateArgs.push(hoursRemaining);
+
+    updateFields.push('days_remaining = ?');
+    updateArgs.push(daysRemaining);
+
+    updateFields.push('years_remaining = ?');
+    updateArgs.push(yearsRemaining);
+
+    updateFields.push('status = ?');
+    updateArgs.push(status);
+
+    // ============================================================
+    // UPDATE INTERVAL FIELDS IF PROVIDED IN REQUEST
+    // ============================================================
+    if (months_interval && parseInt(months_interval) > 0) {
+      updateFields.push('service_interval_months = ?');
+      updateArgs.push(parseInt(months_interval));
+    }
+
+    if (service_interval_years && parseInt(service_interval_years) > 0) {
+      updateFields.push('service_interval_years = ?');
+      updateArgs.push(parseInt(service_interval_years));
+    }
+
+    if (target_hours && parseInt(target_hours) > 0) {
+      updateFields.push('target_hours = ?');
+      updateArgs.push(parseInt(target_hours));
+    }
+
+    updateFields.push('updated_at = CURRENT_TIMESTAMP');
+    updateArgs.push(id);
+
     await db.execute({
-      sql: `
-        UPDATE gse_maintenance SET 
-          last_service_date = ?,
-          current_hours = ?,
-          next_service_date = ?,
-          next_service_hours = ?,
-          next_service_year = ?,
-          hours_remaining = ?,
-          days_remaining = ?,
-          years_remaining = ?,
-          status = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [
-        serviceDate,
-        hours,
-        nextServiceDate,
-        nextServiceHours,
-        nextServiceYear,
-        hoursRemaining,
-        daysRemaining,
-        yearsRemaining,
-        status,
-        id
-      ]
+      sql: `UPDATE gse_maintenance SET ${updateFields.join(', ')} WHERE id = ?`,
+      args: updateArgs
+    });
+
+    // Get updated record
+    const updatedRecord = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
     });
 
     res.json({
@@ -1190,7 +1218,8 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         hours_remaining: hoursRemaining,
         years_remaining: yearsRemaining,
         status: status
-      }
+      },
+      equipment: updatedRecord.rows[0]
     });
   } catch (err) {
     console.error('Error recording service:', err.message);
