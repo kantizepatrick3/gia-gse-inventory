@@ -41,16 +41,11 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
-
 // ============================================================
-// 🧪 TEST ROUTE
+// 🧪 TEST ROUTE - Must be at the top
 // ============================================================
 app.get('/api/test', (req, res) => {
+  console.log('🧪 Test route called!');
   res.json({
     status: 'OK',
     message: 'Server is running!',
@@ -59,21 +54,8 @@ app.get('/api/test', (req, res) => {
       test: '/api/test',
       login: '/api/login',
       parts: '/api/parts',
-      partsCount: '/api/parts/count',
       users: '/api/users',
-      issue: '/api/requests/issue',
-      myRequests: '/api/requests/my-requests',
-      approvals: '/api/approvals/pending',
-      approvalsCount: '/api/approvals/pending/count',
-      approve: '/api/approvals/:id/approve',
-      reject: '/api/approvals/:id/reject',
-      transactions: '/api/transactions',
-      priceHistory: '/api/price-history/:partId',
-      dashboard: '/api/dashboard/stats',
-      maintenance: '/api/gse-maintenance',
-      maintenanceCount: '/api/maintenance/count',
-      lowStock: '/api/reports/low-stock',
-      serviceHistory: '/api/gse-maintenance/:id/history'
+      dashboard: '/api/dashboard/stats'
     }
   });
 });
@@ -90,6 +72,7 @@ const initDatabase = async () => {
     console.log('✅ Database connected');
   } catch (err) {
     console.error('Database connection error:', err);
+    // Try fallback
     try {
       const sqlite3 = require('sqlite3');
       const { open } = require('sqlite');
@@ -128,11 +111,7 @@ const authenticateToken = (req, res, next) => {
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    const result = await db.execute({ 
-      sql: 'SELECT * FROM users WHERE username = ?', 
-      args: [username] 
-    });
-    
+    const result = await db.execute({ sql: 'SELECT * FROM users WHERE username = ?', args: [username] });
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -266,10 +245,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 // ============================================================
 app.get('/api/parts', authenticateToken, async (req, res) => {
   try {
-    const result = await db.execute({
-      sql: 'SELECT * FROM parts ORDER BY part_number',
-      args: []
-    });
+    const result = await db.execute('SELECT * FROM parts ORDER BY part_number');
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching parts:', err.message);
@@ -283,272 +259,33 @@ app.get('/api/parts/count', authenticateToken, async (req, res) => {
       sql: 'SELECT COUNT(*) as count FROM parts',
       args: []
     });
-    res.json({ count: Number(result.rows[0]?.count) || 0 });
+    res.json({ count: result.rows[0]?.count || 0 });
   } catch (err) {
     console.error('Error fetching parts count:', err.message);
     res.json({ count: 0 });
   }
 });
 
-app.post('/api/parts', authenticateToken, async (req, res) => {
-  try {
-    const { 
-      part_number, description, manufacturer, compatible_gse,
-      location_bin, quantity_on_hand, min_stock, max_stock,
-      unit_price, maintenance_type, service_interval_hours,
-      service_interval_months, service_interval_years,
-      contact_person, contact_phone, contact_email
-    } = req.body;
-
-    if (!part_number) {
-      return res.status(400).json({ error: 'Part number is required' });
-    }
-
-    const existing = await db.execute({
-      sql: 'SELECT id FROM parts WHERE part_number = ?',
-      args: [part_number]
-    });
-
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ error: `Part number "${part_number}" already exists` });
-    }
-
-    const result = await db.execute({
-      sql: `INSERT INTO parts 
-            (part_number, description, manufacturer, compatible_gse,
-             location_bin, quantity_on_hand, min_stock, max_stock,
-             unit_price, maintenance_type, service_interval_hours,
-             service_interval_months, service_interval_years,
-             contact_person, contact_phone, contact_email,
-             created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING *`,
-      args: [
-        part_number, description || '', manufacturer || '', compatible_gse || '',
-        location_bin || '', quantity_on_hand || 0, min_stock || 0, max_stock || 0,
-        unit_price || 0, maintenance_type || 'none', service_interval_hours || 0,
-        service_interval_months || 0, service_interval_years || 0,
-        contact_person || '', contact_phone || '', contact_email || ''
-      ]
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Part created successfully',
-      part: result.rows[0]
-    });
-  } catch (err) {
-    console.error('Error creating part:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/parts/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updates = req.body;
-    
-    const partCheck = await db.execute({
-      sql: 'SELECT id FROM parts WHERE id = ?',
-      args: [id]
-    });
-
-    if (partCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-
-    // Build dynamic update query
-    const fields = [];
-    const values = [];
-    for (const [key, value] of Object.entries(updates)) {
-      if (key !== 'id' && key !== 'created_at') {
-        fields.push(`${key} = ?`);
-        values.push(value);
-      }
-    }
-    values.push(id);
-    fields.push('updated_at = CURRENT_TIMESTAMP');
-
-    const result = await db.execute({
-      sql: `UPDATE parts SET ${fields.join(', ')} WHERE id = ? RETURNING *`,
-      args: values
-    });
-
-    res.json({
-      success: true,
-      message: 'Part updated successfully',
-      part: result.rows[0]
-    });
-  } catch (err) {
-    console.error('Error updating part:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const partCheck = await db.execute({
-      sql: 'SELECT part_number FROM parts WHERE id = ?',
-      args: [id]
-    });
-
-    if (partCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-
-    const pendingCheck = await db.execute({
-      sql: 'SELECT id FROM pending_issues WHERE part_id = ? AND status = "pending"',
-      args: [id]
-    });
-
-    if (pendingCheck.rows.length > 0) {
-      return res.status(400).json({ 
-        error: 'Cannot delete part with pending requests' 
-      });
-    }
-
-    await db.execute({
-      sql: 'DELETE FROM parts WHERE id = ?',
-      args: [id]
-    });
-
-    res.json({ success: true, message: 'Part deleted successfully' });
-  } catch (err) {
-    console.error('Error deleting part:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ============================================================
-// TRANSACTIONS ROUTE (HISTORY)
-// ============================================================
-app.get('/api/transactions', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: `SELECT t.*, p.part_number, p.description 
-            FROM transactions t
-            LEFT JOIN parts p ON t.part_id = p.id
-            ORDER BY t.created_at DESC
-            LIMIT 100`,
-      args: []
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching transactions:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/transactions/:partId', authenticateToken, async (req, res) => {
-  try {
-    const { partId } = req.params;
-    const result = await db.execute({
-      sql: `SELECT * FROM transactions 
-            WHERE part_id = ? 
-            ORDER BY created_at DESC`,
-      args: [partId]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching part transactions:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// PRICE HISTORY ROUTE
-// ============================================================
-app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
-  try {
-    const { partId } = req.params;
-    const result = await db.execute({
-      sql: `SELECT * FROM price_history 
-            WHERE part_id = ? 
-            ORDER BY created_at DESC`,
-      args: [partId]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching price history:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// LOW STOCK REPORT
-// ============================================================
-app.get('/api/reports/low-stock', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: 'SELECT * FROM parts WHERE quantity_on_hand <= min_stock ORDER BY part_number',
-      args: []
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching low stock report:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// DASHBOARD STATS - FIXED
+// DASHBOARD ROUTES
 // ============================================================
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
-    console.log('📊 Fetching dashboard stats...');
-    
-    let totalParts = 0;
-    try {
-      const result = await db.execute('SELECT COUNT(*) as count FROM parts');
-      totalParts = Number(result.rows[0]?.count) || 0;
-    } catch (err) {
-      console.error('Error getting parts count:', err.message);
-    }
-
-    let totalMaintenance = 0;
-    try {
-      const result = await db.execute('SELECT COUNT(*) as count FROM gse_maintenance');
-      totalMaintenance = Number(result.rows[0]?.count) || 0;
-    } catch (err) {
-      console.error('Error getting maintenance count:', err.message);
-    }
-
-    let pendingRequests = 0;
-    try {
-      const result = await db.execute('SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"');
-      pendingRequests = Number(result.rows[0]?.count) || 0;
-    } catch (err) {
-      console.error('Error getting pending requests:', err.message);
-    }
-
-    let lowStockItems = 0;
-    try {
-      const result = await db.execute('SELECT COUNT(*) as count FROM parts WHERE quantity_on_hand <= min_stock');
-      lowStockItems = Number(result.rows[0]?.count) || 0;
-    } catch (err) {
-      console.error('Error getting low stock count:', err.message);
-    }
-
-    const stats = {
-      total_parts: totalParts,
-      total_maintenance: totalMaintenance,
-      pending_requests: pendingRequests,
-      low_stock_items: lowStockItems
-    };
-
-    console.log('📊 Dashboard Stats:', stats);
-    res.json(stats);
-    
-  } catch (err) {
-    console.error('Dashboard stats error:', err.message);
-    res.json({ 
-      total_parts: 0, 
-      total_maintenance: 0, 
-      pending_requests: 0, 
-      low_stock_items: 0 
+    const [partsCount, maintenanceCount, pendingRequests, lowStock] = await Promise.all([
+      db.execute({ sql: 'SELECT COUNT(*) as count FROM parts', args: [] }),
+      db.execute({ sql: 'SELECT COUNT(*) as count FROM gse_maintenance', args: [] }),
+      db.execute({ sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"', args: [] }),
+      db.execute({ sql: 'SELECT COUNT(*) as count FROM parts WHERE quantity_on_hand <= min_stock', args: [] })
+    ]);
+    res.json({
+      total_parts: partsCount.rows[0]?.count || 0,
+      total_maintenance: maintenanceCount.rows[0]?.count || 0,
+      pending_requests: pendingRequests.rows[0]?.count || 0,
+      low_stock_items: lowStock.rows[0]?.count || 0
     });
+  } catch (err) {
+    console.error('Error fetching dashboard stats:', err.message);
+    res.json({ total_parts: 0, total_maintenance: 0, pending_requests: 0, low_stock_items: 0 });
   }
 });
 
@@ -570,292 +307,6 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/maintenance/count', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: 'SELECT COUNT(*) as count FROM gse_maintenance',
-      args: []
-    });
-    res.json({ count: Number(result.rows[0]?.count) || 0 });
-  } catch (err) {
-    console.error('Error fetching maintenance count:', err.message);
-    res.json({ count: 0 });
-  }
-});
-
-app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await db.execute({
-      sql: `SELECT * FROM service_history WHERE maintenance_id = ? ORDER BY created_at DESC`,
-      args: [id]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching service history:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// REQUESTS & APPROVALS ROUTES
-// ============================================================
-
-// Create a pending request
-app.post('/api/requests/issue', authenticateToken, async (req, res) => {
-  try {
-    const { part_id, part_number, quantity, gse_registration, technician_name, work_order, notes } = req.body;
-
-    if (!quantity) {
-      return res.status(400).json({ error: 'Quantity is required' });
-    }
-
-    if (quantity <= 0) {
-      return res.status(400).json({ error: 'Quantity must be greater than 0' });
-    }
-
-    let part;
-    if (part_id) {
-      const result = await db.execute({
-        sql: 'SELECT id, part_number, quantity_on_hand FROM parts WHERE id = ?',
-        args: [part_id]
-      });
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Part not found' });
-      }
-      part = result.rows[0];
-    } else if (part_number) {
-      const result = await db.execute({
-        sql: 'SELECT id, part_number, quantity_on_hand FROM parts WHERE part_number = ?',
-        args: [part_number]
-      });
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Part not found' });
-      }
-      part = result.rows[0];
-    } else {
-      return res.status(400).json({ error: 'Either part_id or part_number is required' });
-    }
-
-    if (part.quantity_on_hand < quantity) {
-      return res.status(400).json({
-        error: `Insufficient stock. Available: ${part.quantity_on_hand}, Requested: ${quantity}`
-      });
-    }
-
-    const result = await db.execute({
-      sql: `INSERT INTO pending_issues 
-            (part_id, part_number, quantity, gse_registration, technician_name, 
-             work_order, notes, requested_by, requested_by_name, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            RETURNING *`,
-      args: [
-        part.id,
-        part.part_number,
-        quantity,
-        gse_registration || '',
-        technician_name || '',
-        work_order || '',
-        notes || '',
-        req.user.id,
-        req.user.username,
-        'pending'
-      ]
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Request submitted for approval',
-      request: result.rows[0]
-    });
-
-  } catch (err) {
-    console.error('Error creating pending issue:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get current user's requests
-app.get('/api/requests/my-requests', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: `SELECT pi.*, p.description as part_description, p.quantity_on_hand as current_stock
-            FROM pending_issues pi
-            LEFT JOIN parts p ON pi.part_id = p.id
-            WHERE pi.requested_by = ?
-            ORDER BY pi.created_at DESC`,
-      args: [req.user.id]
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching user requests:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get all pending requests (admin only)
-app.get('/api/approvals/pending', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const result = await db.execute({
-      sql: `SELECT 
-            pi.*,
-            p.description as part_description,
-            p.quantity_on_hand as current_stock,
-            u.full_name as requester_full_name,
-            u.email as requester_email
-            FROM pending_issues pi
-            LEFT JOIN parts p ON pi.part_id = p.id
-            LEFT JOIN users u ON pi.requested_by = u.id
-            WHERE pi.status = 'pending'
-            ORDER BY pi.created_at DESC`,
-      args: []
-    });
-    
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching pending approvals:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get count of pending requests
-app.get('/api/approvals/pending/count', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"',
-      args: []
-    });
-    res.json({ count: Number(result.rows[0]?.count) || 0 });
-  } catch (err) {
-    console.error('Error fetching pending count:', err.message);
-    res.json({ count: 0 });
-  }
-});
-
-// Approve a pending request
-app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const { id } = req.params;
-    const { admin_comment } = req.body;
-
-    const issue = await db.execute({
-      sql: 'SELECT * FROM pending_issues WHERE id = ? AND status = "pending"',
-      args: [id]
-    });
-
-    if (issue.rows.length === 0) {
-      return res.status(404).json({ error: 'Pending request not found' });
-    }
-
-    const pending = issue.rows[0];
-
-    const stockCheck = await db.execute({
-      sql: 'SELECT quantity_on_hand FROM parts WHERE id = ?',
-      args: [pending.part_id]
-    });
-
-    if (stockCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-
-    const currentStock = stockCheck.rows[0].quantity_on_hand;
-    if (currentStock < pending.quantity) {
-      return res.status(400).json({
-        error: `Insufficient stock. Available: ${currentStock}, Requested: ${pending.quantity}`
-      });
-    }
-
-    await db.execute({
-      sql: 'UPDATE parts SET quantity_on_hand = quantity_on_hand - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      args: [pending.quantity, pending.part_id]
-    });
-
-    const result = await db.execute({
-      sql: `UPDATE pending_issues 
-            SET status = 'approved', 
-                admin_comment = ?, 
-                approved_by = ?, 
-                approved_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            RETURNING *`,
-      args: [admin_comment || 'Approved', req.user.username, id]
-    });
-
-    await db.execute({
-      sql: `INSERT INTO transactions 
-            (part_id, transaction_type, quantity, notes, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      args: [
-        pending.part_id,
-        'issue',
-        pending.quantity,
-        `Approved request #${id} - ${admin_comment || ''}`,
-        req.user.username
-      ]
-    });
-
-    res.json({
-      success: true,
-      message: 'Request approved successfully',
-      request: result.rows[0]
-    });
-
-  } catch (err) {
-    console.error('Error approving request:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Reject a pending request
-app.put('/api/approvals/:id/reject', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const { id } = req.params;
-    const { admin_comment } = req.body;
-
-    const issue = await db.execute({
-      sql: 'SELECT * FROM pending_issues WHERE id = ? AND status = "pending"',
-      args: [id]
-    });
-
-    if (issue.rows.length === 0) {
-      return res.status(404).json({ error: 'Pending request not found' });
-    }
-
-    const result = await db.execute({
-      sql: `UPDATE pending_issues 
-            SET status = 'rejected', 
-                admin_comment = ?, 
-                approved_by = ?, 
-                approved_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            RETURNING *`,
-      args: [admin_comment || 'Rejected', req.user.username, id]
-    });
-
-    res.json({
-      success: true,
-      message: 'Request rejected',
-      request: result.rows[0]
-    });
-
-  } catch (err) {
-    console.error('Error rejecting request:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ============================================================
 // HEALTH CHECK
 // ============================================================
@@ -864,27 +315,6 @@ app.get('/api/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// ============================================================
-// 404 HANDLER
-// ============================================================
-app.use((req, res, next) => {
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.path,
-    method: req.method
-  });
-});
-
-// ============================================================
-// ERROR HANDLER
-// ============================================================
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  res.status(500).json({ 
-    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message 
   });
 });
 
@@ -1101,7 +531,7 @@ const createUsers = async () => {
     });
     await db.execute({
       sql: 'INSERT INTO users (username, password_hash, full_name, role, email) VALUES (?, ?, ?, ?, ?)',
-      args: ['manager', managerHash, 'GSE Manager', 'manager', 'manager@example.com']
+      args: ['manager', managerHash, 'Manager User', 'manager', 'manager@example.com']
     });
     await db.execute({
       sql: 'INSERT INTO users (username, password_hash, full_name, role, email) VALUES (?, ?, ?, ?, ?)',
@@ -1163,16 +593,8 @@ const startServer = async () => {
       console.log(`   admin / 1991 (Admin)`);
       console.log(`   manager / manager123 (Manager)`);
       console.log(`   storekeeper / keeper123 (Storekeeper)`);
-      console.log(`\n📊 Dashboard: /api/dashboard/stats`);
-      console.log(`📦 Parts: /api/parts`);
-      console.log(`📥 Receive: POST /api/parts`);
-      console.log(`📤 Issue: POST /api/requests/issue`);
-      console.log(`⏳ Approvals: /api/approvals/pending`);
-      console.log(`🔧 Maintenance: /api/gse-maintenance`);
-      console.log(`📜 History: /api/transactions`);
-      console.log(`📋 Service History: /api/gse-maintenance/:id/history`);
-      console.log(`💰 Price History: /api/price-history/:partId`);
-      console.log(`👥 Users: /api/users`);
+      console.log(`\n🧪 Test Route:`);
+      console.log(`   GET /api/test - Check if server is running`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
