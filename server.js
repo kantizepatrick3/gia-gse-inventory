@@ -842,20 +842,30 @@ app.get('/api/requests/pending/count', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================
+// 📊 DASHBOARD STATS - FIXED
+// ============================================================
+
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
+    console.log('📊 Fetching dashboard stats...');
+    
     const [partsCount, maintenanceCount, pendingRequests, lowStock] = await Promise.all([
       db.execute({ sql: 'SELECT COUNT(*) as count FROM parts', args: [] }),
       db.execute({ sql: 'SELECT COUNT(*) as count FROM gse_maintenance', args: [] }),
-      db.execute({ sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"', args: [] }),
+      db.execute({ sql: "SELECT COUNT(*) as count FROM pending_issues WHERE status = 'pending'", args: [] }),
       db.execute({ sql: 'SELECT COUNT(*) as count FROM parts WHERE quantity_on_hand <= min_stock', args: [] })
     ]);
-    res.json({
-      total_parts: partsCount.rows[0]?.count || 0,
-      total_maintenance: maintenanceCount.rows[0]?.count || 0,
-      pending_requests: pendingRequests.rows[0]?.count || 0,
-      low_stock_items: lowStock.rows[0]?.count || 0
-    });
+    
+    const stats = {
+      total_parts: Number(partsCount.rows[0]?.count) || 0,
+      total_maintenance: Number(maintenanceCount.rows[0]?.count) || 0,
+      pending_requests: Number(pendingRequests.rows[0]?.count) || 0,
+      low_stock_items: Number(lowStock.rows[0]?.count) || 0
+    };
+    
+    console.log('📊 Dashboard Stats:', stats);
+    res.json(stats);
   } catch (err) {
     console.error('Error fetching dashboard stats:', err.message);
     res.json({ total_parts: 0, total_maintenance: 0, pending_requests: 0, low_stock_items: 0 });
