@@ -284,10 +284,12 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
 
 app.get('/api/requests/my-requests', authenticateToken, async (req, res) => {
   try {
+    console.log('📋 Fetching requests for user:', req.user.username, 'ID:', req.user.id);
     const result = await db.execute({
-      sql: `SELECT * FROM pending_issues WHERE requested_by_name = ? ORDER BY created_at DESC`,
-      args: [req.user.username]
+      sql: `SELECT * FROM pending_issues WHERE requested_by = ? ORDER BY created_at DESC`,
+      args: [req.user.id]
     });
+    console.log(`✅ Found ${result.rows.length} requests for user ${req.user.username}`);
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching my requests:', err.message);
@@ -316,58 +318,6 @@ app.get('/api/requests/pending', authenticateToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ============================================================
-// FRONTEND COMPATIBILITY ALIASES - ADDED FOR FRONTEND
-// ============================================================
-
-app.get('/api/requests/pending-data', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-    const result = await db.execute({
-      sql: `
-        SELECT p.*, parts.quantity_on_hand as current_stock, parts.description
-        FROM pending_issues p
-        LEFT JOIN parts ON p.part_id = parts.id
-        WHERE p.status = 'pending'
-        ORDER BY p.created_at ASC
-      `,
-      args: []
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching pending requests:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/requests/pending-list', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-    const result = await db.execute({
-      sql: `
-        SELECT p.*, parts.quantity_on_hand as current_stock, parts.description
-        FROM pending_issues p
-        LEFT JOIN parts ON p.part_id = parts.id
-        WHERE p.status = 'pending'
-        ORDER BY p.created_at ASC
-      `,
-      args: []
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching pending requests:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================================
-// CONTINUE REGULAR ROUTES
-// ============================================================
 
 app.get('/api/approvals/pending', authenticateToken, async (req, res) => {
   try {
