@@ -43,15 +43,12 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`, {
-    ip: req.ip,
-    user: req.user?.username || 'unauthenticated'
-  });
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
 // ============================================================
-// 🧪 TEST ROUTE - Must be at the top
+// 🧪 TEST ROUTE
 // ============================================================
 app.get('/api/test', (req, res) => {
   console.log('🧪 Test route called!');
@@ -74,6 +71,8 @@ app.get('/api/test', (req, res) => {
       priceHistory: '/api/price-history/:partId',
       dashboard: '/api/dashboard/stats',
       maintenance: '/api/gse-maintenance',
+      maintenanceCount: '/api/maintenance/count',
+      lowStock: '/api/reports/low-stock',
       serviceHistory: '/api/gse-maintenance/:id/history'
     }
   });
@@ -91,7 +90,6 @@ const initDatabase = async () => {
     console.log('✅ Database connected');
   } catch (err) {
     console.error('Database connection error:', err);
-    // Try fallback
     try {
       const sqlite3 = require('sqlite3');
       const { open } = require('sqlite');
@@ -130,7 +128,11 @@ const authenticateToken = (req, res, next) => {
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    const result = await db.execute({ sql: 'SELECT * FROM users WHERE username = ?', args: [username] });
+    const result = await db.execute({ 
+      sql: 'SELECT * FROM users WHERE username = ?', 
+      args: [username] 
+    });
+    
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -260,7 +262,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// PARTS ROUTES
+// PARTS ROUTES - FULL CRUD
 // ============================================================
 app.get('/api/parts', authenticateToken, async (req, res) => {
   try {
@@ -281,7 +283,7 @@ app.get('/api/parts/count', authenticateToken, async (req, res) => {
       sql: 'SELECT COUNT(*) as count FROM parts',
       args: []
     });
-    res.json({ count: result.rows[0]?.count || 0 });
+    res.json({ count: Number(result.rows[0]?.count) || 0 });
   } catch (err) {
     console.error('Error fetching parts count:', err.message);
     res.json({ count: 0 });
@@ -317,12 +319,10 @@ app.post('/api/parts', authenticateToken, async (req, res) => {
       contact_person, contact_phone, contact_email
     } = req.body;
 
-    // Validate required fields
     if (!part_number) {
       return res.status(400).json({ error: 'Part number is required' });
     }
 
-    // Check for duplicate part number
     const existing = await db.execute({
       sql: 'SELECT id FROM parts WHERE part_number = ?',
       args: [part_number]
@@ -373,7 +373,6 @@ app.put('/api/parts/:id', authenticateToken, async (req, res) => {
       contact_person, contact_phone, contact_email
     } = req.body;
 
-    // Check if part exists
     const partCheck = await db.execute({
       sql: 'SELECT id FROM parts WHERE id = ?',
       args: [id]
@@ -383,7 +382,6 @@ app.put('/api/parts/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Part not found' });
     }
 
-    // Check for duplicate part number (excluding current part)
     if (part_number) {
       const duplicate = await db.execute({
         sql: 'SELECT id FROM parts WHERE part_number = ? AND id != ?',
@@ -440,7 +438,6 @@ app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if part exists
     const partCheck = await db.execute({
       sql: 'SELECT part_number FROM parts WHERE id = ?',
       args: [id]
@@ -450,7 +447,6 @@ app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Part not found' });
     }
 
-    // Check if part is used in any pending issues
     const pendingCheck = await db.execute({
       sql: 'SELECT id FROM pending_issues WHERE part_id = ? AND status = "pending"',
       args: [id]
@@ -467,10 +463,7 @@ app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
       args: [id]
     });
 
-    res.json({ 
-      success: true, 
-      message: 'Part deleted successfully' 
-    });
+    res.json({ success: true, message: 'Part deleted successfully' });
   } catch (err) {
     console.error('Error deleting part:', err.message);
     res.status(500).json({ error: err.message });
@@ -494,38 +487,61 @@ app.get('/api/reports/low-stock', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// DASHBOARD ROUTES
+// DASHBOARD STATS - FIXED WITH INDIVIDUAL ERROR HANDLING
 // ============================================================
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
-    // Execute all queries in parallel
-    const [partsResult, maintenanceResult, pendingResult, lowStockResult] = await Promise.all([
-      db.execute({ sql: 'SELECT COUNT(*) as count FROM parts', args: [] }),
-      db.execute({ sql: 'SELECT COUNT(*) as count FROM gse_maintenance', args: [] }),
-      db.execute({ sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"', args: [] }),
-      db.execute({ 
-        sql: 'SELECT COUNT(*) as count FROM parts WHERE quantity_on_hand <= min_stock AND quantity_on_hand > 0', 
-        args: [] 
-      })
-    ]);
+    console.log('📊 Fetching dashboard stats for user:', req.user.username);
+    
+    let totalParts = 0;
+    try {
+      const result = await db.execute('SELECT COUNT(*) as count FROM parts');
+      totalParts = Number(result.rows[0]?.count) || 0;
+    } catch (err) {
+      console.error('Error getting parts count:', err.message);
+    }
+
+    let totalMaintenance = 0;
+    try {
+      const result = await db.execute('SELECT COUNT(*) as count FROM gse_maintenance');
+      totalMaintenance = Number(result.rows[0]?.count) || 0;
+    } catch (err) {
+      console.error('Error getting maintenance count:', err.message);
+    }
+
+    let pendingRequests = 0;
+    try {
+      const result = await db.execute('SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"');
+      pendingRequests = Number(result.rows[0]?.count) || 0;
+    } catch (err) {
+      console.error('Error getting pending requests:', err.message);
+    }
+
+    let lowStockItems = 0;
+    try {
+      const result = await db.execute('SELECT COUNT(*) as count FROM parts WHERE quantity_on_hand <= min_stock');
+      lowStockItems = Number(result.rows[0]?.count) || 0;
+    } catch (err) {
+      console.error('Error getting low stock count:', err.message);
+    }
 
     const stats = {
-      total_parts: Number(partsResult.rows[0]?.count) || 0,
-      total_maintenance: Number(maintenanceResult.rows[0]?.count) || 0,
-      pending_requests: Number(pendingResult.rows[0]?.count) || 0,
-      low_stock_items: Number(lowStockResult.rows[0]?.count) || 0
+      total_parts: totalParts,
+      total_maintenance: totalMaintenance,
+      pending_requests: pendingRequests,
+      low_stock_items: lowStockItems
     };
 
     console.log('📊 Dashboard Stats:', stats);
     res.json(stats);
+    
   } catch (err) {
-    console.error('Error fetching dashboard stats:', err.message);
-    // Return defaults with error details for debugging
+    console.error('Dashboard stats error:', err.message);
     res.json({ 
       total_parts: 0, 
       total_maintenance: 0, 
       pending_requests: 0, 
-      low_stock_items: 0
+      low_stock_items: 0 
     });
   }
 });
@@ -554,7 +570,7 @@ app.get('/api/maintenance/count', authenticateToken, async (req, res) => {
       sql: 'SELECT COUNT(*) as count FROM gse_maintenance',
       args: []
     });
-    res.json({ count: result.rows[0]?.count || 0 });
+    res.json({ count: Number(result.rows[0]?.count) || 0 });
   } catch (err) {
     console.error('Error fetching maintenance count:', err.message);
     res.json({ count: 0 });
@@ -562,15 +578,14 @@ app.get('/api/maintenance/count', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// REQUESTS & APPROVALS ROUTES
+// REQUESTS & APPROVALS ROUTES - FULL IMPLEMENTATION
 // ============================================================
 
-// Create a pending request (storekeeper or any authenticated user)
+// Create a pending request
 app.post('/api/requests/issue', authenticateToken, async (req, res) => {
   try {
     const { part_id, part_number, quantity, gse_registration, technician_name, work_order, notes } = req.body;
 
-    // Validate required fields
     if (!quantity) {
       return res.status(400).json({ error: 'Quantity is required' });
     }
@@ -579,7 +594,6 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Quantity must be greater than 0' });
     }
 
-    // Get part info - either by id or part_number
     let part;
     if (part_id) {
       const result = await db.execute({
@@ -603,14 +617,12 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Either part_id or part_number is required' });
     }
 
-    // Check if enough stock is available
     if (part.quantity_on_hand < quantity) {
       return res.status(400).json({
         error: `Insufficient stock. Available: ${part.quantity_on_hand}, Requested: ${quantity}`
       });
     }
 
-    // Create pending issue
     const result = await db.execute({
       sql: `INSERT INTO pending_issues 
             (part_id, part_number, quantity, gse_registration, technician_name, 
@@ -643,7 +655,7 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
   }
 });
 
-// Get current user's pending requests
+// Get current user's requests
 app.get('/api/requests/my-requests', authenticateToken, async (req, res) => {
   try {
     const result = await db.execute({
@@ -697,7 +709,7 @@ app.get('/api/approvals/pending/count', authenticateToken, async (req, res) => {
       sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"',
       args: []
     });
-    res.json({ count: result.rows[0]?.count || 0 });
+    res.json({ count: Number(result.rows[0]?.count) || 0 });
   } catch (err) {
     console.error('Error fetching pending count:', err.message);
     res.json({ count: 0 });
@@ -714,7 +726,6 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { admin_comment } = req.body;
 
-    // Get the pending issue
     const issue = await db.execute({
       sql: 'SELECT * FROM pending_issues WHERE id = ? AND status = "pending"',
       args: [id]
@@ -726,7 +737,6 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
 
     const pending = issue.rows[0];
 
-    // Check stock
     const stockCheck = await db.execute({
       sql: 'SELECT quantity_on_hand FROM parts WHERE id = ?',
       args: [pending.part_id]
@@ -743,13 +753,11 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
       });
     }
 
-    // Update inventory
     await db.execute({
       sql: 'UPDATE parts SET quantity_on_hand = quantity_on_hand - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       args: [pending.quantity, pending.part_id]
     });
 
-    // Update pending issue
     const result = await db.execute({
       sql: `UPDATE pending_issues 
             SET status = 'approved', 
@@ -761,7 +769,6 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
       args: [admin_comment || 'Approved', req.user.username, id]
     });
 
-    // Log transaction
     await db.execute({
       sql: `INSERT INTO transactions 
             (part_id, transaction_type, quantity, notes, created_by, created_at)
@@ -797,7 +804,6 @@ app.put('/api/approvals/:id/reject', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { admin_comment } = req.body;
 
-    // Get the pending issue
     const issue = await db.execute({
       sql: 'SELECT * FROM pending_issues WHERE id = ? AND status = "pending"',
       args: [id]
@@ -807,7 +813,6 @@ app.put('/api/approvals/:id/reject', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Pending request not found' });
     }
 
-    // Update pending issue
     const result = await db.execute({
       sql: `UPDATE pending_issues 
             SET status = 'rejected', 
@@ -843,7 +848,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // ============================================================
-// 404 HANDLER - Must be at the end
+// 404 HANDLER
 // ============================================================
 app.use((req, res, next) => {
   res.status(404).json({ 
@@ -1152,6 +1157,11 @@ const startServer = async () => {
       console.log(`\n📋 My Requests:`);
       console.log(`   GET /api/requests/my-requests - List my requests`);
       console.log(`   POST /api/requests/issue - Create a new request`);
+      console.log(`\n🔧 Parts Management:`);
+      console.log(`   GET /api/parts - List all parts`);
+      console.log(`   POST /api/parts - Create a new part`);
+      console.log(`   PUT /api/parts/:id - Update a part`);
+      console.log(`   DELETE /api/parts/:id - Delete a part`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
