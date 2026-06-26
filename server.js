@@ -1149,7 +1149,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       ]
     });
 
-    // Update maintenance record
+    // Update maintenance record with calculated values
     await db.execute({
       sql: `
         UPDATE gse_maintenance SET 
@@ -1199,10 +1199,10 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
 });
 
 // ============================================================
-// 🔧 MAINTENANCE ROUTES - ADDITIONAL ENDPOINTS (FIX)
+// 🔧 MAINTENANCE ROUTES - ADDITIONAL ENDPOINTS
 // ============================================================
 
-// 1. Update Hours
+// Update Hours
 app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1274,7 +1274,7 @@ app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) =>
   }
 });
 
-// 2. Edit Equipment (PUT)
+// Edit Equipment (PUT)
 app.put('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1334,7 +1334,7 @@ app.put('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// 3. Delete Equipment (DELETE)
+// Delete Equipment (DELETE)
 app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1368,12 +1368,16 @@ app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// 4. Get Attachments
+// ============================================================
+// 📎 MAINTENANCE ATTACHMENT ROUTES
+// ============================================================
+
+// Get all attachments for a maintenance record
 app.get('/api/maintenance-attachments/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await db.execute({
-      sql: 'SELECT * FROM maintenance_attachments WHERE maintenance_id = ? ORDER BY created_at DESC',
+      sql: 'SELECT id, maintenance_id, filename, original_filename, file_type, file_size, uploaded_by, created_at FROM maintenance_attachments WHERE maintenance_id = ? ORDER BY created_at DESC',
       args: [id]
     });
     res.json(result.rows || []);
@@ -1383,13 +1387,48 @@ app.get('/api/maintenance-attachments/:id', authenticateToken, async (req, res) 
   }
 });
 
-// 5. Upload Attachment
+// Download attachment
+app.get('/api/maintenance-attachments/:id/download', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const result = await db.execute({
+      sql: 'SELECT * FROM maintenance_attachments WHERE id = ?',
+      args: [id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    const attachment = result.rows[0];
+    
+    // Convert base64 to buffer
+    const fileBuffer = Buffer.from(attachment.file_data, 'base64');
+    
+    // Set headers for download
+    res.setHeader('Content-Type', attachment.file_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${attachment.original_filename || attachment.filename}"`);
+    res.setHeader('Content-Length', fileBuffer.length);
+    
+    res.send(fileBuffer);
+  } catch (err) {
+    console.error('Error downloading attachment:', err.message);
+    res.status(500).json({ error: 'Failed to download attachment', details: err.message });
+  }
+});
+
+// Upload attachment
 app.post('/api/maintenance-attachments', authenticateToken, async (req, res) => {
   try {
     const { maintenance_id, filename, original_filename, file_data, file_type, file_size } = req.body;
+    
+    if (!maintenance_id) {
+      return res.status(400).json({ error: 'Maintenance ID is required' });
+    }
 
-    if (!maintenance_id || !filename) {
-      return res.status(400).json({ error: 'Maintenance ID and filename are required' });
+    if (!file_data) {
+      return res.status(400).json({ error: 'File data is required' });
     }
 
     const result = await db.execute({
@@ -1401,10 +1440,10 @@ app.post('/api/maintenance-attachments', authenticateToken, async (req, res) => 
       `,
       args: [
         maintenance_id,
-        filename,
-        original_filename || filename,
-        file_data || '',
-        file_type || '',
+        filename || 'upload',
+        original_filename || filename || 'upload',
+        file_data,
+        file_type || 'application/octet-stream',
         file_size || 0,
         req.user.username
       ]
@@ -1421,7 +1460,7 @@ app.post('/api/maintenance-attachments', authenticateToken, async (req, res) => 
   }
 });
 
-// 6. Delete Attachment
+// Delete attachment
 app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
