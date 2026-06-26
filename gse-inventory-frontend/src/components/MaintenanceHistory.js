@@ -1,20 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import * as XLSX from 'xlsx';
-import './MaintenanceHistory.css';
 
 const MaintenanceHistory = ({ token }) => {
   const [equipment, setEquipment] = useState([]);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [historyData, setHistoryData] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showModal, setShowModal] = useState(false);
 
-  const API_URL = process.env.REACT_APP_API_URL || 'https://gia-gse-inventory.onrender.com';
+  const API_URL = 'https://gia-gse-inventory.onrender.com';
 
   useEffect(() => {
     fetchEquipment();
@@ -23,728 +18,408 @@ const MaintenanceHistory = ({ token }) => {
   const fetchEquipment = async () => {
     try {
       setLoading(true);
-      setError('');
-      console.log('📊 Fetching equipment list...');
       const response = await axios.get(`${API_URL}/api/gse-maintenance`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('✅ Equipment loaded:', response.data.equipment?.length || 0);
       setEquipment(response.data.equipment || []);
-    } catch (error) {
-      console.error('Error fetching equipment:', error);
-      setError('Failed to load equipment data');
+    } catch (err) {
+      console.error('Error fetching equipment:', err);
+      setError('Failed to load equipment list');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchHistory = async (equipmentId) => {
+  const fetchHistory = async (equipId) => {
     try {
       setLoading(true);
-      setError('');
-      console.log(`📊 Fetching history for equipment ID: ${equipmentId}`);
-      
-      const response = await axios.get(`${API_URL}/api/gse-maintenance/${equipmentId}/history?limit=50`, {
+      const response = await axios.get(`${API_URL}/api/gse-maintenance/${equipId}/history`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
-      console.log('✅ History response:', response.data);
-      
-      let equipmentData = response.data.equipment || null;
-      let historyData = response.data.history || [];
-      
-      if (!equipmentData && equipmentId) {
-        const found = equipment.find(e => e.id === equipmentId);
-        if (found) {
-          equipmentData = {
-            id: found.id,
-            name: found.equipment_name,
-            type: found.equipment_type,
-            status: found.status,
-            last_service_date: found.last_service_date,
-            next_service_date: found.next_service_date,
-            current_hours: found.current_hours,
-            target_hours: found.target_hours,
-            maintenance_type: found.maintenance_type,
-            maintenance_category: found.maintenance_category,
-            category: found.maintenance_category || found.category,
-            service_performed: found.service_performed
-          };
-        }
-      }
-      
-      historyData.sort((a, b) => {
-        const dateA = new Date(a.service_date || a.created_at || 0);
-        const dateB = new Date(b.service_date || b.created_at || 0);
-        return dateB - dateA;
-      });
-      
-      historyData = historyData.slice(0, 20);
-      
-      setHistory(historyData);
-      setSelectedEquipment(equipmentData);
-      setShowHistoryModal(true);
-      
-      if (!equipmentData) {
-        console.warn('⚠️ No equipment data found for ID:', equipmentId);
-      }
-    } catch (error) {
-      console.error('Error fetching history:', error);
-      setError('Failed to load history data');
-      setHistory([]);
-      setSelectedEquipment(null);
+      setHistoryData(response.data.history || []);
+      setShowModal(true);
+    } catch (err) {
+      console.error('Error fetching history:', err);
+      setError('Failed to load service history');
     } finally {
       setLoading(false);
     }
   };
 
-  const closeHistoryModal = () => {
-    setShowHistoryModal(false);
+  const openHistory = (equip) => {
+    setSelectedEquipment(equip);
+    fetchHistory(equip.id);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
     setSelectedEquipment(null);
-    setHistory([]);
+    setHistoryData([]);
   };
 
   const getStatusBadge = (status) => {
-    const badges = {
-      'overdue': '🔴 Overdue',
-      'due_soon': '🟡 Due Soon',
-      'serviced': '✅ Serviced',
-      'no_maintenance': '⚪ No Maintenance'
-    };
-    return badges[status] || status || 'Unknown';
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      'overdue': '#e74c3c',
-      'due_soon': '#f39c12',
-      'serviced': '#27ae60',
-      'no_maintenance': '#95a5a6'
-    };
-    return colors[status] || '#95a5a6';
-  };
-
-  const getCategoryBadge = (category) => {
-    if (!category) {
-      return {
-        bg: '#e9ecef',
-        color: '#6c757d',
-        text: 'Not specified',
-        border: '#ced4da',
-        icon: '📋'
-      };
+    switch(status) {
+      case 'overdue': return { color: '#e74c3c', text: '🔴 OVERDUE', bg: '#fdeaea' };
+      case 'due_soon': return { color: '#f39c12', text: '🟡 DUE SOON', bg: '#fef5e7' };
+      case 'serviced': return { color: '#27ae60', text: '✅ SERVICED', bg: '#eafaf1' };
+      case 'no_maintenance': return { color: '#95a5a6', text: '⚪ NO MAINTENANCE', bg: '#f5f5f5' };
+      default: return { color: '#95a5a6', text: status || 'UNKNOWN', bg: '#f5f5f5' };
     }
-    const cat = category.toLowerCase();
-    if (cat === 'preventive') {
-      return {
-        bg: '#e8f5e9',
-        color: '#2e7d32',
-        text: 'Preventive',
-        border: '#a5d6a7',
-        icon: '🛡️'
-      };
-    } else if (cat === 'corrective') {
-      return {
-        bg: '#fce4ec',
-        color: '#c62828',
-        text: 'Corrective',
-        border: '#ef9a9a',
-        icon: '🔧'
-      };
-    }
-    return {
-      bg: '#e9ecef',
-      color: '#6c757d',
-      text: category || 'Unknown',
-      border: '#ced4da',
-      icon: '📋'
-    };
   };
-
-  const filteredEquipment = equipment.filter(item => {
-    if (filter !== 'all' && item.status !== filter) return false;
-    if (searchTerm && !item.equipment_name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-    return true;
-  });
 
   const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
+    if (!dateString) return 'Not scheduled';
     try {
       return new Date(dateString).toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
-        day: '2-digit'
+        day: 'numeric'
       });
-    } catch {
-      return dateString;
+    } catch (e) {
+      return 'Not scheduled';
     }
   };
 
-  const formatFullDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch {
-      return dateString;
-    }
-  };
-
-  // Get last service performed for equipment
-  const getLastServicePerformed = (item) => {
-    // Check if equipment has service_performed field
-    if (item.service_performed) {
-      return item.service_performed;
-    }
-    // Otherwise return 'No service recorded'
-    return 'No service recorded';
-  };
-
-  // ============================================================
-  // EXPORT TO EXCEL
-  // ============================================================
-  const exportToExcel = () => {
-    if (history.length === 0) {
-      alert('No history data to export');
-      return;
-    }
-    
-    setExportLoading(true);
-    
-    try {
-      const excelData = history.map((h, index) => ({
-        '#': index + 1,
-        'Service Date': h.service_date ? formatFullDate(h.service_date) : 'N/A',
-        'Service Performed': h.service_performed || 'Maintenance recorded',
-        'Technician': h.technician || h.technician_name || 'System',
-        'Category': h.category || 'Not specified',
-        'Hours at Service': h.hours_at_service || h.current_hours || 0,
-        'Notes': h.notes || ''
-      }));
-
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(excelData);
-
-      ws['!cols'] = [
-        { wch: 5 },   // #
-        { wch: 20 },  // Service Date
-        { wch: 35 },  // Service Performed
-        { wch: 20 },  // Technician
-        { wch: 15 },  // Category
-        { wch: 15 },  // Hours at Service
-        { wch: 30 }   // Notes
-      ];
-
-      XLSX.utils.book_append_sheet(wb, ws, 'Maintenance History');
-      
-      const fileName = `maintenance_history_${selectedEquipment?.name || selectedEquipment?.equipment_name || 'equipment'}_${new Date().toISOString().split('T')[0]}.xlsx`;
-      XLSX.writeFile(wb, fileName);
-      
-    } catch (error) {
-      console.error('Export error:', error);
-      alert('Error exporting data to Excel');
-    } finally {
-      setExportLoading(false);
-    }
-  };
-
-  const exportAllToExcel = async () => {
-    try {
-      setExportLoading(true);
-      const response = await axios.get(`${API_URL}/api/service-history/all`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      const data = response.data || [];
-      if (data.length === 0) {
-        alert('No data to export');
-        setExportLoading(false);
-        return;
-      }
-      
-      const excelData = data.map((item, index) => ({
-        '#': index + 1,
-        'Equipment': item.equipment_name || 'N/A',
-        'Type': item.equipment_type || 'N/A',
-        'Status': item.status || 'N/A',
-        'Service Date': item.service_date ? formatFullDate(item.service_date) : 'N/A',
-        'Service Performed': item.service_performed || '',
-        'Technician': item.technician_name || '',
-        'Category': item.category || '',
-        'Hours': item.current_hours || 0,
-        'Notes': item.notes || ''
-      }));
-
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(excelData);
-
-      ws['!cols'] = [
-        { wch: 5 },   // #
-        { wch: 20 },  // Equipment
-        { wch: 15 },  // Type
-        { wch: 15 },  // Status
-        { wch: 20 },  // Service Date
-        { wch: 35 },  // Service Performed
-        { wch: 20 },  // Technician
-        { wch: 15 },  // Category
-        { wch: 10 },  // Hours
-        { wch: 30 }   // Notes
-      ];
-
-      XLSX.utils.book_append_sheet(wb, ws, 'All Maintenance History');
-      
-      const fileName = `all_maintenance_history_${new Date().toISOString().split('T')[0]}.xlsx`;
-      XLSX.writeFile(wb, fileName);
-      
-    } catch (error) {
-      console.error('Export error:', error);
-      alert('Error exporting all data to Excel');
-    } finally {
-      setExportLoading(false);
-    }
-  };
-
-  const exportCSV = () => {
-    if (history.length === 0) {
-      alert('No history data to export');
-      return;
-    }
-    
-    setExportLoading(true);
-    
-    try {
-      const headers = ['Service Date', 'Service Performed', 'Technician', 'Category', 'Hours at Service', 'Notes'];
-      const rows = history.map(h => [
-        h.service_date || '',
-        h.service_performed || '',
-        h.technician || h.technician_name || '',
-        h.category || 'Not specified',
-        h.hours_at_service || h.current_hours || 0,
-        h.notes || ''
-      ]);
-      
-      let csv = headers.join(',') + '\n';
-      rows.forEach(row => {
-        const escapedRow = row.map(field => `"${String(field).replace(/"/g, '""')}"`);
-        csv += escapedRow.join(',') + '\n';
-      });
-      
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `maintenance_history_${selectedEquipment?.name || selectedEquipment?.equipment_name || 'equipment'}_${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Export error:', error);
-      alert('Error exporting data');
-    } finally {
-      setExportLoading(false);
-    }
-  };
+  if (loading && equipment.length === 0) {
+    return <div style={{ textAlign: 'center', padding: '50px' }}>Loading maintenance records...</div>;
+  }
 
   return (
-    <div className="maintenance-history-container">
-      <h2>📋 Maintenance History</h2>
-      
+    <div>
+      <h2>📋 Service History</h2>
+      <p style={{ color: '#666', marginBottom: '20px' }}>
+        View service history for all GSE equipment.
+      </p>
+
       {error && (
         <div style={{
           backgroundColor: '#f8d7da',
           color: '#721c24',
-          padding: '10px',
+          padding: '15px',
           borderRadius: '5px',
           margin: '10px 0',
           border: '1px solid #f5c6cb'
         }}>
           ❌ {error}
-          <button 
-            onClick={() => setError('')}
-            style={{
-              float: 'right',
-              background: 'none',
-              border: 'none',
-              color: '#721c24',
-              cursor: 'pointer',
-              fontSize: '18px'
-            }}
-          >
-            ✕
-          </button>
         </div>
       )}
 
-      <div className="filters">
-        <div className="filter-group">
-          <label>Filter by Status:</label>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="all">All Status</option>
-            <option value="overdue">Overdue</option>
-            <option value="due_soon">Due Soon</option>
-            <option value="serviced">Serviced</option>
-            <option value="no_maintenance">No Maintenance</option>
-          </select>
+      {equipment.length === 0 ? (
+        <div style={{
+          textAlign: 'center',
+          padding: '60px',
+          backgroundColor: '#f9f9f9',
+          borderRadius: '8px',
+          border: '1px dashed #ddd'
+        }}>
+          <p style={{ fontSize: '18px', color: '#666' }}>No maintenance records found.</p>
         </div>
-        <div className="filter-group">
-          <label>Search Equipment:</label>
-          <input
-            type="text"
-            placeholder="Search by name..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <button onClick={exportAllToExcel} disabled={exportLoading} className="export-btn">
-          {exportLoading ? 'Exporting...' : '📊 Export All to Excel'}
-        </button>
-      </div>
-
-      {loading && <div className="loading">Loading...</div>}
-
-      {/* ============================================================
-          MAIN TABLE - Equipment List with Service Performed Column
-          ============================================================ */}
-      <div className="equipment-list">
-        <table className="maintenance-table">
-          <thead>
-            <tr>
-              <th>Equipment</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Last Service</th>
-              <th>Next Service</th>
-              <th style={{ minWidth: '180px' }}>Service Performed</th>
-              <th>Maintenance Category</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredEquipment.length === 0 && !loading && (
-              <tr>
-                <td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
-                  No equipment found
-                </td>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#2c3e50', color: 'white' }}>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Equipment</th>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Type</th>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Status</th>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Last Service</th>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Next Service</th>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Service Performed</th>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Maintenance Category</th>
+                <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'center' }}>Action</th>
               </tr>
-            )}
-            {filteredEquipment.map(item => {
-              const categoryBadge = getCategoryBadge(item.maintenance_category || item.category);
-              const lastService = getLastServicePerformed(item);
-              return (
-                <tr key={item.id}>
-                  <td><strong>{item.equipment_name}</strong></td>
-                  <td>{item.equipment_type || 'N/A'}</td>
-                  <td>
-                    <span style={{ color: getStatusColor(item.status) }}>
-                      {getStatusBadge(item.status)}
-                    </span>
-                  </td>
-                  <td>{item.last_service_date ? formatDate(item.last_service_date) : 'Never'}</td>
-                  <td>{item.next_service_date ? formatDate(item.next_service_date) : 'Not scheduled'}</td>
-                  <td style={{
-                    fontWeight: '500',
-                    color: '#1a5276',
-                    maxWidth: '200px',
-                    wordBreak: 'break-word'
-                  }}>
-                    {lastService}
-                  </td>
-                  <td>
-                    <span style={{
-                      padding: '4px 12px',
-                      borderRadius: '20px',
-                      backgroundColor: categoryBadge.bg,
-                      color: categoryBadge.color,
-                      border: `1px solid ${categoryBadge.border}`,
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      display: 'inline-block'
-                    }}>
-                      {categoryBadge.icon} {categoryBadge.text}
-                    </span>
-                  </td>
-                  <td>
-                    <button 
-                      className="view-history-btn"
-                      onClick={() => fetchHistory(item.id)}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#3498db',
-                        color: 'white',
-                        border: 'none',
+            </thead>
+            <tbody>
+              {equipment.map(eq => {
+                const statusStyle = getStatusBadge(eq.status);
+                // Get last service info
+                const lastService = eq.last_service_date || eq.date_performed || eq.last_service_year || 'Not recorded';
+                const lastServiceDisplay = typeof lastService === 'string' && lastService.includes('-') 
+                  ? formatDate(lastService) 
+                  : lastService;
+                
+                // Get category display for main table
+                let categoryDisplay = 'Not specified';
+                let categoryColor = '#95a5a6';
+                let categoryBg = '#f5f5f5';
+                
+                if (eq.maintenance_category) {
+                  const cat = eq.maintenance_category.toLowerCase();
+                  if (cat === 'preventive') {
+                    categoryDisplay = '🛡️ Preventive';
+                    categoryColor = '#27ae60';
+                    categoryBg = '#eafaf1';
+                  } else if (cat === 'corrective') {
+                    categoryDisplay = '🔧 Corrective';
+                    categoryColor = '#e74c3c';
+                    categoryBg = '#fdeaea';
+                  } else {
+                    categoryDisplay = eq.maintenance_category;
+                  }
+                }
+                
+                return (
+                  <tr key={eq.id} style={{ backgroundColor: statusStyle.bg }}>
+                    <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold' }}>
+                      {eq.equipment_name}
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                      {eq.equipment_type || '-'}
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                      <span style={{ color: statusStyle.color, fontWeight: 'bold' }}>
+                        {statusStyle.text}
+                      </span>
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px' }}>
+                      {lastServiceDisplay}
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', fontWeight: 'bold' }}>
+                      {formatDate(eq.next_service_date)}
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px' }}>
+                      {eq.service_performed || 'No service recorded'}
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                      <span style={{
+                        backgroundColor: categoryBg,
+                        color: categoryColor,
+                        padding: '2px 8px',
                         borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '12px'
-                      }}
-                    >
-                      View History
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                        fontSize: '12px',
+                        fontWeight: 'bold'
+                      }}>
+                        {categoryDisplay}
+                      </span>
+                    </td>
+                    <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>
+                      <button
+                        onClick={() => openHistory(eq)}
+                        style={{
+                          backgroundColor: '#3498db',
+                          color: 'white',
+                          border: 'none',
+                          padding: '6px 12px',
+                          borderRadius: '3px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📋 View History
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* ============================================================
-          HISTORY MODAL
-          ============================================================ */}
-      {showHistoryModal && selectedEquipment && (
+      {/* Service History Modal */}
+      {showModal && selectedEquipment && (
         <div style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.6)',
+          backgroundColor: 'rgba(0,0,0,0.5)',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          zIndex: 1000,
-          padding: '20px'
+          zIndex: 1000
         }}>
           <div style={{
             backgroundColor: 'white',
-            borderRadius: '12px',
-            maxWidth: '1100px',
-            width: '95%',
+            padding: '30px',
+            borderRadius: '8px',
+            width: '90%',
+            maxWidth: '900px',
             maxHeight: '90vh',
-            overflow: 'auto',
-            padding: '25px',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+            overflowY: 'auto'
           }}>
-            {/* Modal Header */}
             <div style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              borderBottom: '2px solid #3498db',
-              paddingBottom: '15px',
-              marginBottom: '20px',
-              flexWrap: 'wrap',
-              gap: '10px'
+              marginBottom: '20px'
             }}>
-              <h3 style={{ margin: 0, color: '#2c3e50' }}>
-                📋 Service History for {selectedEquipment.name || selectedEquipment.equipment_name || 'Equipment'}
-              </h3>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button 
-                  onClick={exportToExcel}
-                  disabled={exportLoading || history.length === 0}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: '#27ae60',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: exportLoading || history.length === 0 ? 'not-allowed' : 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  {exportLoading ? '⏳...' : '📊 Export Excel'}
-                </button>
-                <button 
-                  onClick={exportCSV}
-                  disabled={exportLoading || history.length === 0}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: '#3498db',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: exportLoading || history.length === 0 ? 'not-allowed' : 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  {exportLoading ? '⏳...' : '📄 Export CSV'}
-                </button>
-                <button 
-                  onClick={closeHistoryModal}
-                  style={{
-                    backgroundColor: '#e74c3c',
-                    color: 'white',
-                    border: 'none',
-                    padding: '8px 20px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  ✕ Close
-                </button>
-              </div>
+              <h3 style={{ margin: 0 }}>📋 Service History for {selectedEquipment.equipment_name}</h3>
+              <button
+                onClick={closeModal}
+                style={{
+                  backgroundColor: '#e74c3c',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕ Close
+              </button>
             </div>
 
-            {/* Equipment Info Card */}
+            {/* Equipment Summary */}
             <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr',
+              gap: '15px',
               padding: '15px',
               backgroundColor: '#f8f9fa',
               borderRadius: '6px',
               marginBottom: '20px',
-              border: '1px solid #e9ecef',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: '10px'
+              fontSize: '14px'
             }}>
               <div>
-                <span style={{ fontSize: '12px', color: '#666' }}>Equipment:</span>
-                <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                  {selectedEquipment.name || selectedEquipment.equipment_name}
-                </span>
+                <strong>Equipment:</strong> {selectedEquipment.equipment_name}
               </div>
               <div>
-                <span style={{ fontSize: '12px', color: '#666' }}>Type:</span>
-                <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                  {selectedEquipment.type || selectedEquipment.equipment_type || 'N/A'}
-                </span>
+                <strong>Type:</strong> {selectedEquipment.equipment_type || '-'}
               </div>
               <div>
-                <span style={{ fontSize: '12px', color: '#666' }}>Status:</span>
-                <span style={{ fontWeight: 'bold', marginLeft: '5px', color: getStatusColor(selectedEquipment.status) }}>
-                  {getStatusBadge(selectedEquipment.status)}
-                </span>
+                <strong>Status:</strong> {getStatusBadge(selectedEquipment.status).text}
               </div>
-              {selectedEquipment.current_hours !== undefined && (
-                <div>
-                  <span style={{ fontSize: '12px', color: '#666' }}>Hours:</span>
-                  <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                    {selectedEquipment.current_hours}
-                    {selectedEquipment.target_hours && ` / ${selectedEquipment.target_hours}`}
-                  </span>
-                </div>
-              )}
-              {selectedEquipment.last_service_date && (
-                <div>
-                  <span style={{ fontSize: '12px', color: '#666' }}>Last Service:</span>
-                  <span style={{ fontWeight: 'bold', marginLeft: '5px' }}>
-                    {formatFullDate(selectedEquipment.last_service_date)}
-                  </span>
-                </div>
-              )}
-              {selectedEquipment.next_service_date && (
-                <div>
-                  <span style={{ fontSize: '12px', color: '#666' }}>Next Service:</span>
-                  <span style={{ fontWeight: 'bold', marginLeft: '5px', color: '#1976d2' }}>
-                    {formatFullDate(selectedEquipment.next_service_date)}
-                  </span>
-                </div>
-              )}
               <div>
-                <span style={{ fontSize: '12px', color: '#666' }}>Total Services:</span>
-                <span style={{ fontWeight: 'bold', marginLeft: '5px', color: '#27ae60' }}>
-                  {history.length}
-                </span>
+                <strong>Hours:</strong> {selectedEquipment.current_hours || 0} / {selectedEquipment.target_hours || selectedEquipment.service_interval_hours || 0}
+              </div>
+              <div>
+                <strong>Last Service:</strong> {formatDate(selectedEquipment.last_service_date)}
+              </div>
+              <div>
+                <strong>Next Service:</strong> {formatDate(selectedEquipment.next_service_date)}
               </div>
             </div>
 
+            {/* Total Services Count */}
+            <div style={{
+              marginBottom: '15px',
+              padding: '10px',
+              backgroundColor: '#e3f2fd',
+              borderRadius: '5px',
+              fontSize: '14px'
+            }}>
+              <strong>Total Services:</strong> {historyData.length}
+            </div>
+
             {/* Service History Table */}
-            {history.length === 0 ? (
+            {historyData.length === 0 ? (
               <div style={{
                 textAlign: 'center',
-                padding: '60px 20px',
-                backgroundColor: '#f8f9fa',
+                padding: '40px',
+                backgroundColor: '#f9f9f9',
                 borderRadius: '8px',
-                border: '1px dashed #ccc'
+                border: '1px dashed #ddd'
               }}>
-                <div style={{ fontSize: '48px', marginBottom: '15px' }}>📭</div>
-                <p style={{ fontSize: '16px', color: '#666', margin: 0 }}>
-                  No service history records found for this equipment.
-                </p>
-                <p style={{ fontSize: '14px', color: '#999', marginTop: '5px' }}>
-                  Services will appear here once maintenance is recorded.
-                </p>
+                <p style={{ fontSize: '16px', color: '#666' }}>No service history recorded for this equipment.</p>
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  fontSize: '13px'
-                }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#2c3e50', color: 'white' }}>
-                      <th style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>#</th>
-                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Service Date</th>
-                      <th style={{ 
-                        padding: '10px', 
-                        textAlign: 'left', 
-                        border: '1px solid #ddd',
-                        minWidth: '200px',
-                        backgroundColor: '#1a5276',
-                        color: 'white'
-                      }}>
-                        🔧 Service Performed
-                      </th>
-                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Technician</th>
-                      <th style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>Category</th>
-                      <th style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>Hours</th>
-                      <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Notes</th>
+                      <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>#</th>
+                      <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Service Date</th>
+                      <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Service Performed</th>
+                      <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Technician</th>
+                      <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Category</th>
+                      <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Hours</th>
+                      <th style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'left' }}>Notes</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {history.map((h, index) => {
-                      const categoryBadge = getCategoryBadge(h.category);
+                    {historyData.map((record, index) => {
+                      // Determine category display
+                      let categoryDisplay = 'Not specified';
+                      let categoryColor = '#95a5a6';
+                      let categoryBg = '#f5f5f5';
+                      
+                      if (record.maintenance_category) {
+                        const category = record.maintenance_category.toLowerCase();
+                        if (category === 'preventive') {
+                          categoryDisplay = '🛡️ Preventive';
+                          categoryColor = '#27ae60';
+                          categoryBg = '#eafaf1';
+                        } else if (category === 'corrective') {
+                          categoryDisplay = '🔧 Corrective';
+                          categoryColor = '#e74c3c';
+                          categoryBg = '#fdeaea';
+                        } else {
+                          categoryDisplay = record.maintenance_category;
+                        }
+                      }
+                      
                       return (
-                        <tr key={index} style={{
-                          backgroundColor: index % 2 === 0 ? '#f9f9f9' : 'white'
-                        }}>
-                          <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center', fontWeight: 'bold' }}>
+                        <tr key={record.id || index} style={{ backgroundColor: index % 2 === 0 ? '#f9f9f9' : 'white' }}>
+                          <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>
                             {index + 1}
                           </td>
-                          <td style={{ padding: '8px', border: '1px solid #ddd' }}>
-                            {h.service_date ? formatFullDate(h.service_date) : 'N/A'}
+                          <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                            {record.service_date ? new Date(record.service_date).toLocaleString() : '-'}
                           </td>
-                          <td style={{ 
-                            padding: '8px', 
-                            border: '1px solid #ddd',
-                            fontWeight: '600',
-                            color: '#1a5276',
-                            backgroundColor: '#eaf2f8'
-                          }}>
-                            {h.service_performed || 'Maintenance recorded'}
+                          <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                            {record.service_performed || '-'}
                           </td>
-                          <td style={{ padding: '8px', border: '1px solid #ddd' }}>
-                            {h.technician || h.technician_name || 'System'}
+                          <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                            {record.technician_name || '-'}
                           </td>
-                          <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>
+                          <td style={{ border: '1px solid #ddd', padding: '8px' }}>
                             <span style={{
-                              padding: '4px 12px',
-                              borderRadius: '20px',
-                              backgroundColor: categoryBadge.bg,
-                              color: categoryBadge.color,
-                              border: `1px solid ${categoryBadge.border}`,
-                              fontSize: '11px',
-                              fontWeight: 'bold',
-                              display: 'inline-block'
+                              backgroundColor: categoryBg,
+                              color: categoryColor,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: 'bold'
                             }}>
-                              {categoryBadge.icon} {categoryBadge.text}
+                              {categoryDisplay}
                             </span>
                           </td>
-                          <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>
-                            {h.hours_at_service || h.current_hours || 0}
+                          <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>
+                            {record.current_hours || 0}
                           </td>
-                          <td style={{ padding: '8px', border: '1px solid #ddd', maxWidth: '200px', wordBreak: 'break-word' }}>
-                            {h.notes || '-'}
+                          <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px' }}>
+                            {record.notes || '-'}
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
-                  <tfoot>
-                    <tr style={{ backgroundColor: '#f8f9fa', fontWeight: 'bold' }}>
-                      <td colSpan="7" style={{ padding: '10px', textAlign: 'center', border: '1px solid #ddd' }}>
-                        Showing {history.length} service record{history.length !== 1 ? 's' : ''}
-                      </td>
-                    </tr>
-                  </tfoot>
                 </table>
+                <div style={{
+                  marginTop: '10px',
+                  padding: '8px',
+                  backgroundColor: '#f9f9f9',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  color: '#666',
+                  textAlign: 'right'
+                }}>
+                  Showing {historyData.length} service records
+                </div>
               </div>
             )}
+
+            <div style={{
+              marginTop: '20px',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                onClick={closeModal}
+                style={{
+                  backgroundColor: '#95a5a6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
