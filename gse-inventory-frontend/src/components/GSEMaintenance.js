@@ -289,6 +289,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     }
   };
 
+  // ========== FIX 1: Attachment Upload ==========
   const handleFileUpload = async (maintenanceId, file) => {
     if (!file) return;
     setUploading(true);
@@ -296,10 +297,13 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     reader.onloadend = async () => {
       const base64String = reader.result.split(',')[1];
       try {
-        await axios.post(`${API_URL}/api/maintenance-attachment/${maintenanceId}`, {
+        await axios.post(`${API_URL}/api/maintenance-attachments`, {
+          maintenance_id: maintenanceId,
           filename: file.name,
+          original_filename: file.name,
           file_data: base64String,
-          file_type: file.type
+          file_type: file.type,
+          file_size: file.size
         }, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -307,6 +311,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         fetchAttachments(maintenanceId);
         setTimeout(() => setMessage(''), 3000);
       } catch (err) {
+        console.error('Upload error:', err);
         setError(err.response?.data?.error || 'Error uploading file');
         setTimeout(() => setError(''), 3000);
       } finally {
@@ -334,9 +339,10 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     }
   };
 
+  // ========== FIX 2: Attachment Download ==========
   const downloadAttachment = async (attachmentId, filename) => {
     try {
-      const response = await fetch(`${API_URL}/api/maintenance-attachment/${attachmentId}/download`, {
+      const response = await fetch(`${API_URL}/api/maintenance-attachments/${attachmentId}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -432,6 +438,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     }
   };
 
+  // ========== FIX 3: Service Recording with proper intervals ==========
   const handleRecordService = async (e, equipId) => {
     e.preventDefault();
     setLoading(true);
@@ -459,6 +466,8 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         current_hours: serviceData.current_hours,
         target_hours: serviceData.target_hours,
         months_interval: serviceData.months_interval,
+        service_interval_months: serviceData.service_interval_months || serviceData.months_interval,
+        service_interval_years: serviceData.service_interval_years,
         maintenance_category: serviceData.maintenance_category || 'preventive'
       };
       
