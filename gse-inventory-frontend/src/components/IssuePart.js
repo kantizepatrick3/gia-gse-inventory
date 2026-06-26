@@ -41,7 +41,8 @@ const IssuePart = ({ token, user }) => {
       const response = await axios.get(`${API_URL}/api/requests/my-requests`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setMyRequests(response.data.requests || []);
+      // FIX: Use response.data directly (API returns array, not { requests: [...] })
+      setMyRequests(response.data || []);
     } catch (err) {
       console.error('Error fetching requests:', err);
     }
@@ -351,7 +352,7 @@ const IssuePart = ({ token, user }) => {
                     );
                   })}
                 </tbody>
-               </table>
+              </table>
             </div>
           )}
         </div>
