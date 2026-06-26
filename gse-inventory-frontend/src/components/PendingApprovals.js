@@ -18,7 +18,6 @@ const PendingApprovals = ({ token, user }) => {
     setLoading(true);
     try {
       console.log('📋 Fetching pending approvals...');
-      // ✅ FIX: Use /api/approvals/pending instead of /api/requests/pending
       const response = await axios.get(`${API_URL}/api/approvals/pending`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -37,7 +36,6 @@ const PendingApprovals = ({ token, user }) => {
     setLoading(true);
     try {
       console.log(`✅ Approving request ${requestId}...`);
-      // ✅ FIX: Use PUT /api/approvals/:id/approve
       const response = await axios.put(`${API_URL}/api/approvals/${requestId}/approve`, {
         comment: comment[requestId] || 'Approved by admin'
       }, {
@@ -66,7 +64,6 @@ const PendingApprovals = ({ token, user }) => {
     setLoading(true);
     try {
       console.log(`❌ Rejecting request ${requestId}...`);
-      // ✅ FIX: Use PUT /api/approvals/:id/reject
       const response = await axios.put(`${API_URL}/api/approvals/${requestId}/reject`, {
         comment: comment[requestId] || 'Rejected by admin'
       }, {
@@ -106,7 +103,11 @@ const PendingApprovals = ({ token, user }) => {
   // Clean notes for display
   const cleanNotes = (notes) => {
     if (!notes) return notes;
-    return notes.replace('🔧 Preventive Maintenance - ', '').replace('🛠️ Corrective Maintenance - ', '');
+    return notes
+      .replace('🔧 Preventive Maintenance - ', '')
+      .replace('🛠️ Corrective Maintenance - ', '')
+      .replace('🔧 Preventive Maintenance', '')
+      .replace('🛠️ Corrective Maintenance', '');
   };
 
   if (user?.role !== 'admin' && user?.role !== 'manager') {
@@ -203,17 +204,35 @@ const PendingApprovals = ({ token, user }) => {
             <tbody>
               {requests.map((req, index) => {
                 const maintType = getMaintenanceType(req.notes);
+                const cleanedNotes = cleanNotes(req.notes);
+                
                 return (
                   <tr key={req.id || index} style={{
                     backgroundColor: index % 2 === 0 ? '#f9f9f9' : 'white'
                   }}>
-                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>{index + 1}</td>
-                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                    <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>{index + 1}</td>
+                    <td style={{ padding: '8px', border: '1px solid #ddd', fontSize: '12px' }}>
                       {req.created_at ? new Date(req.created_at).toLocaleString() : 'N/A'}
                     </td>
-                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>{req.requested_by_name || 'Unknown'}</td>
-                    <td style={{ padding: '8px', border: '1px solid #ddd' }}><strong>{req.part_number}</strong></td>
-                    <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center', fontWeight: 'bold' }}>{req.quantity}</td>
+                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                      <strong>{req.requested_by_name || 'Unknown'}</strong>
+                      {req.description && (
+                        <div style={{ fontSize: '11px', color: '#666' }}>
+                          {req.description}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                      <strong>{req.part_number}</strong>
+                      {req.current_stock !== undefined && (
+                        <div style={{ fontSize: '11px', color: '#666' }}>
+                          Stock: {req.current_stock}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center', fontWeight: 'bold' }}>
+                      {req.quantity}
+                    </td>
                     <td style={{ padding: '8px', border: '1px solid #ddd' }}>
                       {maintType ? (
                         <span style={{
@@ -222,19 +241,43 @@ const PendingApprovals = ({ token, user }) => {
                           backgroundColor: maintType.bg,
                           color: maintType.color,
                           fontSize: '12px',
-                          fontWeight: 'bold'
+                          fontWeight: 'bold',
+                          display: 'inline-block'
                         }}>
                           {maintType.label}
                         </span>
-                      ) : '-'}
+                      ) : (
+                        <span style={{ color: '#999', fontSize: '12px' }}>-</span>
+                      )}
+                      {cleanedNotes && (
+                        <div style={{ fontSize: '11px', color: '#888', marginTop: '3px' }}>
+                          {cleanedNotes}
+                        </div>
+                      )}
                     </td>
-                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>{req.gse_registration || '-'}</td>
-                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>{req.technician_name || '-'}</td>
+                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                      <code style={{ 
+                        backgroundColor: '#f5f5f5', 
+                        padding: '2px 6px', 
+                        borderRadius: '3px',
+                        fontSize: '12px'
+                      }}>
+                        {req.gse_registration || '-'}
+                      </code>
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #ddd' }}>
+                      {req.technician_name || '-'}
+                      {req.work_order && (
+                        <div style={{ fontSize: '11px', color: '#888' }}>
+                          WO: {req.work_order}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>
                       <div style={{ marginBottom: '5px' }}>
                         <input
                           type="text"
-                          placeholder="Comment"
+                          placeholder="Add comment..."
                           value={comment[req.id] || ''}
                           onChange={(e) => setComment({...comment, [req.id]: e.target.value})}
                           style={{
@@ -246,41 +289,66 @@ const PendingApprovals = ({ token, user }) => {
                           }}
                         />
                       </div>
-                      <button
-                        onClick={() => handleApprove(req.id)}
-                        disabled={loading}
-                        style={{
-                          backgroundColor: '#27ae60',
-                          color: 'white',
-                          border: 'none',
-                          padding: '5px 10px',
-                          borderRadius: '3px',
-                          marginRight: '5px',
-                          cursor: loading ? 'not-allowed' : 'pointer'
-                        }}
-                      >
-                        ✅ Approve
-                      </button>
-                      <button
-                        onClick={() => handleReject(req.id)}
-                        disabled={loading}
-                        style={{
-                          backgroundColor: '#e74c3c',
-                          color: 'white',
-                          border: 'none',
-                          padding: '5px 10px',
-                          borderRadius: '3px',
-                          cursor: loading ? 'not-allowed' : 'pointer'
-                        }}
-                      >
-                        ❌ Reject
-                      </button>
+                      <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                        <button
+                          onClick={() => handleApprove(req.id)}
+                          disabled={loading}
+                          style={{
+                            backgroundColor: '#27ae60',
+                            color: 'white',
+                            border: 'none',
+                            padding: '5px 10px',
+                            borderRadius: '3px',
+                            cursor: loading ? 'not-allowed' : 'pointer',
+                            fontSize: '12px'
+                          }}
+                        >
+                          ✅ Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(req.id)}
+                          disabled={loading}
+                          style={{
+                            backgroundColor: '#e74c3c',
+                            color: 'white',
+                            border: 'none',
+                            padding: '5px 10px',
+                            borderRadius: '3px',
+                            cursor: loading ? 'not-allowed' : 'pointer',
+                            fontSize: '12px'
+                          }}
+                        >
+                          ❌ Reject
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          
+          <div style={{ 
+            marginTop: '15px', 
+            padding: '10px', 
+            backgroundColor: '#f9f9f9', 
+            borderRadius: '5px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            fontSize: '14px'
+          }}>
+            <span>
+              <strong>Total Pending:</strong> {requests.length}
+            </span>
+            <span>
+              <span style={{ color: '#27ae60' }}>🟢</span> Preventive: {requests.filter(r => r.notes && r.notes.includes('Preventive')).length}
+            </span>
+            <span>
+              <span style={{ color: '#e74c3c' }}>🔴</span> Corrective: {requests.filter(r => r.notes && r.notes.includes('Corrective')).length}
+            </span>
+          </div>
         </div>
       )}
     </div>
