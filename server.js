@@ -828,11 +828,14 @@ app.get('/api/maintenance/overdue', authenticateToken, async (req, res) => {
 
 app.get('/api/requests/pending/count', authenticateToken, async (req, res) => {
   try {
+    console.log('📊 Counting pending requests...');
     const result = await db.execute({
-      sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"',
+      sql: "SELECT COUNT(*) as count FROM pending_issues WHERE status = 'pending'",
       args: []
     });
-    res.json({ count: result.rows[0]?.count || 0 });
+    const count = Number(result.rows[0]?.count) || 0;
+    console.log(`✅ Pending count: ${count}`);
+    res.json({ count: count });
   } catch (err) {
     console.error('Error fetching pending requests count:', err.message);
     res.json({ count: 0 });
