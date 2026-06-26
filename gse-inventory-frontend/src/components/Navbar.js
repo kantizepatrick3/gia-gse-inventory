@@ -1,6 +1,5 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import ChangePassword from './ChangePassword';
 
 const Navbar = ({ user, token, onLogout }) => {
   const navigate = useNavigate();
@@ -10,61 +9,119 @@ const Navbar = ({ user, token, onLogout }) => {
     navigate('/login');
   };
 
-  const isApprover = user?.role === 'admin' || user?.role === 'manager';
+  const navStyle = {
+    backgroundColor: '#2c3e50',
+    padding: '12px 24px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '10px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+  };
+
+  const linkStyle = {
+    color: '#ecf0f1',
+    textDecoration: 'none',
+    padding: '8px 12px',
+    borderRadius: '4px',
+    fontSize: '14px',
+    fontWeight: '500',
+    transition: 'background-color 0.2s'
+  };
+
+  const linkHoverStyle = {
+    backgroundColor: '#34495e'
+  };
+
+  const brandStyle = {
+    color: 'white',
+    textDecoration: 'none',
+    fontSize: '20px',
+    fontWeight: 'bold',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px'
+  };
+
+  const userInfoStyle = {
+    color: '#ecf0f1',
+    fontSize: '14px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '15px',
+    flexWrap: 'wrap'
+  };
+
+  const logoutButtonStyle = {
+    backgroundColor: '#e74c3c',
+    color: 'white',
+    border: 'none',
+    padding: '6px 14px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500'
+  };
+
+  const logoutButtonHoverStyle = {
+    backgroundColor: '#c0392b'
+  };
+
+  const [hoveredLink, setHoveredLink] = React.useState(null);
+  const [isLogoutHovered, setIsLogoutHovered] = React.useState(false);
+
+  const links = [
+    { path: '/', label: '🏠 Dashboard' },
+    { path: '/parts', label: '📦 Parts' },
+    { path: '/receive', label: '📥 Receive' },
+    { path: '/issue', label: '📤 Issue' },
+    { path: '/approvals', label: '⏳ Approvals' },
+    { path: '/maintenance', label: '🔧 Maintenance' },
+    { path: '/transactions', label: '📜 History' },
+    { path: '/maintenance-history', label: '📋 Service History' },
+    { path: '/price-history', label: '💰 Price History' },
+    { path: '/gse-status', label: '📊 GSE Status' }, // NEW: Added GSE Status link
+  ];
+
+  // Only show Users link for admin
+  if (user?.role === 'admin') {
+    links.push({ path: '/users', label: '👥 Users' });
+  }
 
   return (
-    <nav style={{
-      backgroundColor: '#2c3e50',
-      padding: '14px 25px',
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: '10px'
-    }}>
-      <div style={{ 
-        display: 'flex', 
-        gap: '15px', 
-        alignItems: 'center',
-        flexWrap: 'wrap'
-      }}>
-        <Link to="/dashboard" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>🏠 Dashboard</Link>
-        <Link to="/parts" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>📦 Parts</Link>
-        <Link to="/receive" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>📥 Receive</Link>
-        <Link to="/issue" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>📤 Issue</Link>
-        {isApprover && (
-          <Link to="/approvals" style={{ color: '#f39c12', textDecoration: 'none', fontWeight: 'bold', padding: '6px 12px' }}>⏳ Approvals</Link>
-        )}
-        <Link to="/maintenance" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>🔧 Maintenance</Link>
-        <Link to="/transactions" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>📜 History</Link>
-        <Link to="/maintenance-history" style={{ color: '#5dade2', textDecoration: 'none', fontWeight: 'bold', padding: '6px 12px' }}>📋 Service History</Link>
-        {/* ✅ ADD PRICE HISTORY LINK */}
-        <Link to="/price-history" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>💰 Price History</Link>
-        {user?.role === 'admin' && (
-          <Link to="/users" style={{ color: 'white', textDecoration: 'none', padding: '6px 12px' }}>👥 Users</Link>
-        )}
-      </div>
-      
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '15px'
-      }}>
-        <div style={{ color: 'white', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span>👋 {user?.username} ({user?.role === 'admin' ? 'Admin' : user?.role === 'manager' ? 'Mgr' : 'SK'})</span>
-          <ChangePassword token={token} user={user} onLogout={onLogout} />
+    <nav style={navStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+        <Link to="/" style={brandStyle}>
+          <span>✈️</span> GSE Inventory
+        </Link>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+          {links.map((link) => (
+            <Link
+              key={link.path}
+              to={link.path}
+              style={{
+                ...linkStyle,
+                ...(hoveredLink === link.path ? linkHoverStyle : {})
+              }}
+              onMouseEnter={() => setHoveredLink(link.path)}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              {link.label}
+            </Link>
+          ))}
         </div>
-        <button 
-          onClick={handleLogout} 
+      </div>
+      <div style={userInfoStyle}>
+        <span>👋 {user?.full_name || user?.username || 'User'} ({user?.role || 'Role'})</span>
+        <button
           style={{
-            padding: '6px 12px',
-            backgroundColor: '#e74c3c',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '13px'
+            ...logoutButtonStyle,
+            ...(isLogoutHovered ? logoutButtonHoverStyle : {})
           }}
+          onMouseEnter={() => setIsLogoutHovered(true)}
+          onMouseLeave={() => setIsLogoutHovered(false)}
+          onClick={handleLogout}
         >
           Logout
         </button>
