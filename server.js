@@ -317,6 +317,58 @@ app.get('/api/requests/pending', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================
+// FRONTEND COMPATIBILITY ALIASES - ADDED FOR FRONTEND
+// ============================================================
+
+app.get('/api/requests/pending-data', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const result = await db.execute({
+      sql: `
+        SELECT p.*, parts.quantity_on_hand as current_stock, parts.description
+        FROM pending_issues p
+        LEFT JOIN parts ON p.part_id = parts.id
+        WHERE p.status = 'pending'
+        ORDER BY p.created_at ASC
+      `,
+      args: []
+    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching pending requests:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/requests/pending-list', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const result = await db.execute({
+      sql: `
+        SELECT p.*, parts.quantity_on_hand as current_stock, parts.description
+        FROM pending_issues p
+        LEFT JOIN parts ON p.part_id = parts.id
+        WHERE p.status = 'pending'
+        ORDER BY p.created_at ASC
+      `,
+      args: []
+    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching pending requests:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// CONTINUE REGULAR ROUTES
+// ============================================================
+
 app.get('/api/approvals/pending', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'manager') {
