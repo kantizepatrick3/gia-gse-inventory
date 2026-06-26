@@ -51,7 +51,6 @@ app.use((req, res, next) => {
 // 🧪 TEST ROUTE
 // ============================================================
 app.get('/api/test', (req, res) => {
-  console.log('🧪 Test route called!');
   res.json({
     status: 'OK',
     message: 'Server is running!',
@@ -68,6 +67,7 @@ app.get('/api/test', (req, res) => {
       approvalsCount: '/api/approvals/pending/count',
       approve: '/api/approvals/:id/approve',
       reject: '/api/approvals/:id/reject',
+      transactions: '/api/transactions',
       priceHistory: '/api/price-history/:partId',
       dashboard: '/api/dashboard/stats',
       maintenance: '/api/gse-maintenance',
@@ -262,7 +262,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// PARTS ROUTES - FULL CRUD
+// PARTS ROUTES
 // ============================================================
 app.get('/api/parts', authenticateToken, async (req, res) => {
   try {
@@ -287,25 +287,6 @@ app.get('/api/parts/count', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching parts count:', err.message);
     res.json({ count: 0 });
-  }
-});
-
-app.get('/api/parts/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await db.execute({
-      sql: 'SELECT * FROM parts WHERE id = ?',
-      args: [id]
-    });
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Part not found' });
-    }
-    
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error fetching part:', err.message);
-    res.status(500).json({ error: err.message });
   }
 });
 
@@ -365,14 +346,8 @@ app.post('/api/parts', authenticateToken, async (req, res) => {
 app.put('/api/parts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { 
-      part_number, description, manufacturer, compatible_gse,
-      location_bin, quantity_on_hand, min_stock, max_stock,
-      unit_price, maintenance_type, service_interval_hours,
-      service_interval_months, service_interval_years,
-      contact_person, contact_phone, contact_email
-    } = req.body;
-
+    const updates = req.body;
+    
     const partCheck = await db.execute({
       sql: 'SELECT id FROM parts WHERE id = ?',
       args: [id]
@@ -382,45 +357,21 @@ app.put('/api/parts/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Part not found' });
     }
 
-    if (part_number) {
-      const duplicate = await db.execute({
-        sql: 'SELECT id FROM parts WHERE part_number = ? AND id != ?',
-        args: [part_number, id]
-      });
-      if (duplicate.rows.length > 0) {
-        return res.status(400).json({ error: `Part number "${part_number}" already exists` });
+    // Build dynamic update query
+    const fields = [];
+    const values = [];
+    for (const [key, value] of Object.entries(updates)) {
+      if (key !== 'id' && key !== 'created_at') {
+        fields.push(`${key} = ?`);
+        values.push(value);
       }
     }
+    values.push(id);
+    fields.push('updated_at = CURRENT_TIMESTAMP');
 
     const result = await db.execute({
-      sql: `UPDATE parts SET 
-            part_number = COALESCE(?, part_number),
-            description = COALESCE(?, description),
-            manufacturer = COALESCE(?, manufacturer),
-            compatible_gse = COALESCE(?, compatible_gse),
-            location_bin = COALESCE(?, location_bin),
-            quantity_on_hand = COALESCE(?, quantity_on_hand),
-            min_stock = COALESCE(?, min_stock),
-            max_stock = COALESCE(?, max_stock),
-            unit_price = COALESCE(?, unit_price),
-            maintenance_type = COALESCE(?, maintenance_type),
-            service_interval_hours = COALESCE(?, service_interval_hours),
-            service_interval_months = COALESCE(?, service_interval_months),
-            service_interval_years = COALESCE(?, service_interval_years),
-            contact_person = COALESCE(?, contact_person),
-            contact_phone = COALESCE(?, contact_phone),
-            contact_email = COALESCE(?, contact_email),
-            updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            RETURNING *`,
-      args: [
-        part_number, description, manufacturer, compatible_gse,
-        location_bin, quantity_on_hand, min_stock, max_stock,
-        unit_price, maintenance_type, service_interval_hours,
-        service_interval_months, service_interval_years,
-        contact_person, contact_phone, contact_email,
-        id
-      ]
+      sql: `UPDATE parts SET ${fields.join(', ')} WHERE id = ? RETURNING *`,
+      args: values
     });
 
     res.json({
@@ -454,7 +405,7 @@ app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
 
     if (pendingCheck.rows.length > 0) {
       return res.status(400).json({ 
-        error: 'Cannot delete part with pending requests. Approve or reject pending requests first.' 
+        error: 'Cannot delete part with pending requests' 
       });
     }
 
@@ -466,6 +417,61 @@ app.delete('/api/parts/:id', authenticateToken, async (req, res) => {
     res.json({ success: true, message: 'Part deleted successfully' });
   } catch (err) {
     console.error('Error deleting part:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// TRANSACTIONS ROUTE (HISTORY)
+// ============================================================
+app.get('/api/transactions', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: `SELECT t.*, p.part_number, p.description 
+            FROM transactions t
+            LEFT JOIN parts p ON t.part_id = p.id
+            ORDER BY t.created_at DESC
+            LIMIT 100`,
+      args: []
+    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching transactions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/transactions/:partId', authenticateToken, async (req, res) => {
+  try {
+    const { partId } = req.params;
+    const result = await db.execute({
+      sql: `SELECT * FROM transactions 
+            WHERE part_id = ? 
+            ORDER BY created_at DESC`,
+      args: [partId]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching part transactions:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// PRICE HISTORY ROUTE
+// ============================================================
+app.get('/api/price-history/:partId', authenticateToken, async (req, res) => {
+  try {
+    const { partId } = req.params;
+    const result = await db.execute({
+      sql: `SELECT * FROM price_history 
+            WHERE part_id = ? 
+            ORDER BY created_at DESC`,
+      args: [partId]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching price history:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -487,11 +493,11 @@ app.get('/api/reports/low-stock', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// DASHBOARD STATS - FIXED WITH INDIVIDUAL ERROR HANDLING
+// DASHBOARD STATS - FIXED
 // ============================================================
 app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
-    console.log('📊 Fetching dashboard stats for user:', req.user.username);
+    console.log('📊 Fetching dashboard stats...');
     
     let totalParts = 0;
     try {
@@ -577,8 +583,22 @@ app.get('/api/maintenance/count', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/gse-maintenance/:id/history', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.execute({
+      sql: `SELECT * FROM service_history WHERE maintenance_id = ? ORDER BY created_at DESC`,
+      args: [id]
+    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching service history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================
-// REQUESTS & APPROVALS ROUTES - FULL IMPLEMENTATION
+// REQUESTS & APPROVALS ROUTES
 // ============================================================
 
 // Create a pending request
@@ -716,7 +736,7 @@ app.get('/api/approvals/pending/count', authenticateToken, async (req, res) => {
   }
 });
 
-// Approve a pending request (admin only)
+// Approve a pending request
 app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -794,7 +814,7 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
   }
 });
 
-// Reject a pending request (admin only)
+// Reject a pending request
 app.put('/api/approvals/:id/reject', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -864,9 +884,7 @@ app.use((req, res, next) => {
 app.use((err, req, res, next) => {
   console.error('Error:', err.stack);
   res.status(500).json({ 
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message 
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message 
   });
 });
 
@@ -1145,23 +1163,16 @@ const startServer = async () => {
       console.log(`   admin / 1991 (Admin)`);
       console.log(`   manager / manager123 (Manager)`);
       console.log(`   storekeeper / keeper123 (Storekeeper)`);
-      console.log(`\n🧪 Test Route:`);
-      console.log(`   GET /api/test - Check if server is running`);
-      console.log(`\n📊 Dashboard:`);
-      console.log(`   GET /api/dashboard/stats - Get dashboard statistics`);
-      console.log(`\n📝 Pending Approvals:`);
-      console.log(`   GET /api/approvals/pending - List pending requests`);
-      console.log(`   GET /api/approvals/pending/count - Count pending requests`);
-      console.log(`   PUT /api/approvals/:id/approve - Approve a request`);
-      console.log(`   PUT /api/approvals/:id/reject - Reject a request`);
-      console.log(`\n📋 My Requests:`);
-      console.log(`   GET /api/requests/my-requests - List my requests`);
-      console.log(`   POST /api/requests/issue - Create a new request`);
-      console.log(`\n🔧 Parts Management:`);
-      console.log(`   GET /api/parts - List all parts`);
-      console.log(`   POST /api/parts - Create a new part`);
-      console.log(`   PUT /api/parts/:id - Update a part`);
-      console.log(`   DELETE /api/parts/:id - Delete a part`);
+      console.log(`\n📊 Dashboard: /api/dashboard/stats`);
+      console.log(`📦 Parts: /api/parts`);
+      console.log(`📥 Receive: POST /api/parts`);
+      console.log(`📤 Issue: POST /api/requests/issue`);
+      console.log(`⏳ Approvals: /api/approvals/pending`);
+      console.log(`🔧 Maintenance: /api/gse-maintenance`);
+      console.log(`📜 History: /api/transactions`);
+      console.log(`📋 Service History: /api/gse-maintenance/:id/history`);
+      console.log(`💰 Price History: /api/price-history/:partId`);
+      console.log(`👥 Users: /api/users`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
