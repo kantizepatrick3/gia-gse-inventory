@@ -1027,24 +1027,41 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
 
     const maintenance = maintenanceResult.rows[0];
     const serviceDate = service_date || new Date().toISOString().split('T')[0];
-    const hours = current_hours ? parseInt(current_hours) : (maintenance.current_hours || 0);
+    const hours = current_hours ? parseInt(current_hours) : (parseInt(maintenance.current_hours) || 0);
+    const maintType = maintenance.maintenance_type || 'none';
 
-    // Calculate next service values
     let nextServiceDate = null;
     let nextServiceHours = 0;
     let daysRemaining = 0;
     let hoursRemaining = 0;
+    let yearsRemaining = 0;
+    let nextServiceYear = null;
     let status = 'serviced';
 
-    // Calculate based on maintenance type
-    if (maintenance.maintenance_type === 'hour') {
-      const intervalHours = parseInt(maintenance.service_interval_hours) || 0;
+    // Get intervals with proper parsing
+    let intervalHours = parseInt(maintenance.service_interval_hours) || 0;
+    let intervalMonths = parseInt(maintenance.service_interval_months) || 0;
+    let intervalYears = parseInt(maintenance.service_interval_years) || 0;
+
+    // If interval is stored as string, try to extract number
+    if (isNaN(intervalMonths) && maintenance.service_interval_months) {
+      const match = String(maintenance.service_interval_months).match(/\d+/);
+      if (match) intervalMonths = parseInt(match[0]) || 0;
+    }
+    if (isNaN(intervalYears) && maintenance.service_interval_years) {
+      const match = String(maintenance.service_interval_years).match(/\d+/);
+      if (match) intervalYears = parseInt(match[0]) || 0;
+    }
+
+    // ============================================================
+    // HOUR-BASED MAINTENANCE
+    // ============================================================
+    if (maintType === 'hour') {
       if (intervalHours > 0) {
         nextServiceHours = hours + intervalHours;
         hoursRemaining = intervalHours;
       }
       
-      const intervalMonths = parseInt(maintenance.service_interval_months) || 0;
       if (intervalMonths > 0) {
         const date = new Date(serviceDate);
         date.setMonth(date.getMonth() + intervalMonths);
@@ -1056,14 +1073,22 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       }
       
-      if (hoursRemaining <= 0 && nextServiceHours > 0) {
-        status = 'overdue';
-      } else if (hoursRemaining <= 50 && hoursRemaining > 0) {
-        status = 'due_soon';
+      if (intervalHours > 0 && intervalMonths > 0) {
+        if (hoursRemaining <= 0 || daysRemaining <= 0) status = 'overdue';
+        else if (hoursRemaining <= 50 || daysRemaining <= 30) status = 'due_soon';
+      } else if (intervalHours > 0) {
+        if (hoursRemaining <= 0) status = 'overdue';
+        else if (hoursRemaining <= 50) status = 'due_soon';
+      } else if (intervalMonths > 0) {
+        if (daysRemaining <= 0) status = 'overdue';
+        else if (daysRemaining <= 30) status = 'due_soon';
       }
-      
-    } else if (maintenance.maintenance_type === 'month') {
-      const intervalMonths = parseInt(maintenance.service_interval_months) || 0;
+    }
+
+    // ============================================================
+    // MONTH-BASED MAINTENANCE
+    // ============================================================
+    else if (maintType === 'month') {
       if (intervalMonths > 0) {
         const date = new Date(serviceDate);
         date.setMonth(date.getMonth() + intervalMonths);
@@ -1074,30 +1099,29 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         const diffTime = nextDate - today;
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        if (daysRemaining <= 0) {
-          status = 'overdue';
-        } else if (daysRemaining <= 30) {
-          status = 'due_soon';
-        }
+        if (daysRemaining <= 0) status = 'overdue';
+        else if (daysRemaining <= 30) status = 'due_soon';
       }
-      
-    } else if (maintenance.maintenance_type === 'year') {
-      const intervalYears = parseInt(maintenance.service_interval_years) || 0;
+    }
+
+    // ============================================================
+    // YEAR-BASED MAINTENANCE
+    // ============================================================
+    else if (maintType === 'year') {
       if (intervalYears > 0) {
         const date = new Date(serviceDate);
         date.setFullYear(date.getFullYear() + intervalYears);
         nextServiceDate = date.toISOString().split('T')[0];
+        nextServiceYear = date.getFullYear();
+        yearsRemaining = intervalYears;
         
         const today = new Date();
         const nextDate = new Date(nextServiceDate);
         const diffTime = nextDate - today;
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        if (daysRemaining <= 0) {
-          status = 'overdue';
-        } else if (daysRemaining <= 60) {
-          status = 'due_soon';
-        }
+        if (daysRemaining <= 0) status = 'overdue';
+        else if (daysRemaining <= 60) status = 'due_soon';
       }
     }
 
@@ -1114,7 +1138,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         parseInt(id),
         maintenance.equipment_name || '',
         maintenance.equipment_type || '',
-        maintenance.maintenance_type || 'none',
+        maintType,
         serviceDate,
         service_performed || '',
         technician_name || '',
@@ -1125,7 +1149,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       ]
     });
 
-    // Update maintenance record with calculated values
+    // Update maintenance record
     await db.execute({
       sql: `
         UPDATE gse_maintenance SET 
@@ -1133,8 +1157,10 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
           current_hours = ?,
           next_service_date = ?,
           next_service_hours = ?,
+          next_service_year = ?,
           hours_remaining = ?,
           days_remaining = ?,
+          years_remaining = ?,
           status = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -1144,8 +1170,10 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         hours,
         nextServiceDate,
         nextServiceHours,
+        nextServiceYear,
         hoursRemaining,
         daysRemaining,
+        yearsRemaining,
         status,
         id
       ]
@@ -1157,14 +1185,268 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       data: {
         next_service_date: nextServiceDate,
         next_service_hours: nextServiceHours,
+        next_service_year: nextServiceYear,
         days_remaining: daysRemaining,
         hours_remaining: hoursRemaining,
+        years_remaining: yearsRemaining,
         status: status
       }
     });
   } catch (err) {
     console.error('Error recording service:', err.message);
     res.status(500).json({ error: 'Failed to record service', details: err.message });
+  }
+});
+
+// ============================================================
+// 🔧 MAINTENANCE ROUTES - ADDITIONAL ENDPOINTS (FIX)
+// ============================================================
+
+// 1. Update Hours
+app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { current_hours } = req.body;
+
+    if (current_hours === undefined || current_hours === null) {
+      return res.status(400).json({ error: 'Current hours are required' });
+    }
+
+    const hours = parseInt(current_hours);
+    if (isNaN(hours) || hours < 0) {
+      return res.status(400).json({ error: 'Invalid hours value' });
+    }
+
+    const maintenanceResult = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (maintenanceResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Maintenance record not found' });
+    }
+
+    const maintenance = maintenanceResult.rows[0];
+    const targetHours = parseInt(maintenance.target_hours) || parseInt(maintenance.service_interval_hours) || 0;
+    const hoursRemaining = targetHours > 0 ? targetHours - hours : 0;
+    
+    let status = maintenance.status;
+    if (targetHours > 0) {
+      if (hoursRemaining <= 0) {
+        status = 'overdue';
+      } else if (hoursRemaining <= 50) {
+        status = 'due_soon';
+      } else {
+        status = 'serviced';
+      }
+    }
+
+    await db.execute({
+      sql: `
+        UPDATE gse_maintenance SET 
+          current_hours = ?,
+          hours_remaining = ?,
+          status = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [hours, hoursRemaining, status, id]
+    });
+
+    const updatedRecord = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    res.json({
+      success: true,
+      message: 'Hours updated successfully',
+      data: { 
+        current_hours: hours, 
+        hours_remaining: hoursRemaining, 
+        status: status 
+      },
+      equipment: updatedRecord.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating hours:', err.message);
+    res.status(500).json({ error: 'Failed to update hours', details: err.message });
+  }
+});
+
+// 2. Edit Equipment (PUT)
+app.put('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      equipment_name, equipment_type, maintenance_type,
+      service_interval_hours, service_interval_months, service_interval_years,
+      target_hours, notes, part_id
+    } = req.body;
+
+    const existing = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Maintenance record not found' });
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (equipment_name !== undefined) { updates.push('equipment_name = ?'); values.push(equipment_name); }
+    if (equipment_type !== undefined) { updates.push('equipment_type = ?'); values.push(equipment_type); }
+    if (maintenance_type !== undefined) { updates.push('maintenance_type = ?'); values.push(maintenance_type); }
+    if (service_interval_hours !== undefined) { updates.push('service_interval_hours = ?'); values.push(parseInt(service_interval_hours) || 0); }
+    if (service_interval_months !== undefined) { updates.push('service_interval_months = ?'); values.push(parseInt(service_interval_months) || 0); }
+    if (service_interval_years !== undefined) { updates.push('service_interval_years = ?'); values.push(parseInt(service_interval_years) || 0); }
+    if (target_hours !== undefined) { updates.push('target_hours = ?'); values.push(parseInt(target_hours) || 0); }
+    if (notes !== undefined) { updates.push('notes = ?'); values.push(notes); }
+    if (part_id !== undefined) { updates.push('part_id = ?'); values.push(part_id || null); }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+
+    await db.execute({
+      sql: `UPDATE gse_maintenance SET ${updates.join(', ')} WHERE id = ?`,
+      args: values
+    });
+
+    const result = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    res.json({
+      success: true,
+      message: 'Equipment updated successfully',
+      equipment: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating equipment:', err.message);
+    res.status(500).json({ error: 'Failed to update equipment', details: err.message });
+  }
+});
+
+// 3. Delete Equipment (DELETE)
+app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Maintenance record not found' });
+    }
+
+    await db.execute({
+      sql: 'DELETE FROM service_history WHERE maintenance_id = ?',
+      args: [id]
+    });
+
+    await db.execute({
+      sql: 'DELETE FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    res.json({
+      success: true,
+      message: 'Maintenance record deleted successfully'
+    });
+  } catch (err) {
+    console.error('Error deleting maintenance record:', err.message);
+    res.status(500).json({ error: 'Failed to delete maintenance record', details: err.message });
+  }
+});
+
+// 4. Get Attachments
+app.get('/api/maintenance-attachments/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.execute({
+      sql: 'SELECT * FROM maintenance_attachments WHERE maintenance_id = ? ORDER BY created_at DESC',
+      args: [id]
+    });
+    res.json(result.rows || []);
+  } catch (err) {
+    console.error('Error fetching attachments:', err.message);
+    res.json([]);
+  }
+});
+
+// 5. Upload Attachment
+app.post('/api/maintenance-attachments', authenticateToken, async (req, res) => {
+  try {
+    const { maintenance_id, filename, original_filename, file_data, file_type, file_size } = req.body;
+
+    if (!maintenance_id || !filename) {
+      return res.status(400).json({ error: 'Maintenance ID and filename are required' });
+    }
+
+    const result = await db.execute({
+      sql: `
+        INSERT INTO maintenance_attachments 
+        (maintenance_id, filename, original_filename, file_data, file_type, file_size, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        RETURNING *
+      `,
+      args: [
+        maintenance_id,
+        filename,
+        original_filename || filename,
+        file_data || '',
+        file_type || '',
+        file_size || 0,
+        req.user.username
+      ]
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Attachment uploaded successfully',
+      attachment: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error uploading attachment:', err.message);
+    res.status(500).json({ error: 'Failed to upload attachment', details: err.message });
+  }
+});
+
+// 6. Delete Attachment
+app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const existing = await db.execute({
+      sql: 'SELECT * FROM maintenance_attachments WHERE id = ?',
+      args: [id]
+    });
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+
+    await db.execute({
+      sql: 'DELETE FROM maintenance_attachments WHERE id = ?',
+      args: [id]
+    });
+
+    res.json({
+      success: true,
+      message: 'Attachment deleted successfully'
+    });
+  } catch (err) {
+    console.error('Error deleting attachment:', err.message);
+    res.status(500).json({ error: 'Failed to delete attachment', details: err.message });
   }
 });
 
