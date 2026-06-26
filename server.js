@@ -542,13 +542,14 @@ app.post('/api/parts', authenticateToken, async (req, res) => {
 
     const partId = result.rows[0].id;
 
-    // AUTO-CREATE MAINTENANCE RECORD
+    // AUTO-SYNC: ONLY copy Part #, Description, Manufacturer to GSE Maintenance
     try {
       await db.execute({
         sql: `
           INSERT INTO gse_maintenance (
             equipment_name,
             equipment_type,
+            manufacturer,
             part_id,
             maintenance_type,
             gse_status,
@@ -561,20 +562,21 @@ app.post('/api/parts', authenticateToken, async (req, res) => {
             created_by,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `,
         args: [
           part_number,
-          description || 'GSE Equipment',
+          description || '',
+          manufacturer || '',
           partId,
-          maintenance_type || 'none',
+          'none',
           'In-Service',
-          service_interval_hours || 0,
-          service_interval_months || 0,
-          service_interval_years || 0,
-          contact_person || '',
-          contact_phone || '',
-          contact_email || '',
+          0,
+          0,
+          0,
+          NULL,
+          NULL,
+          NULL,
           req.user.username
         ]
       });
@@ -626,33 +628,27 @@ app.put('/api/parts/:id', authenticateToken, async (req, res) => {
       ]
     });
 
-    // AUTO-UPDATE MAINTENANCE RECORD
+    // AUTO-UPDATE: ONLY copy Part #, Description, Manufacturer to GSE Maintenance
     try {
+      const partResult = await db.execute({
+        sql: 'SELECT part_number, description, manufacturer FROM parts WHERE id = ?',
+        args: [partId]
+      });
+      const part = partResult.rows[0];
+
       await db.execute({
         sql: `
           UPDATE gse_maintenance SET 
             equipment_name = ?,
             equipment_type = ?,
-            maintenance_type = ?,
-            service_interval_hours = ?,
-            service_interval_months = ?,
-            service_interval_years = ?,
-            contact_person = ?,
-            contact_phone = ?,
-            contact_email = ?,
+            manufacturer = ?,
             updated_at = CURRENT_TIMESTAMP
           WHERE part_id = ?
         `,
         args: [
-          (await db.execute({ sql: 'SELECT part_number FROM parts WHERE id = ?', args: [partId] })).rows[0].part_number,
-          description || 'GSE Equipment',
-          maintenance_type || 'none',
-          service_interval_hours || 0,
-          service_interval_months || 0,
-          service_interval_years || 0,
-          contact_person || '',
-          contact_phone || '',
-          contact_email || '',
+          part.part_number,
+          part.description || '',
+          part.manufacturer || '',
           partId
         ]
       });
@@ -1573,6 +1569,7 @@ app.get('/api/gse-status', authenticateToken, async (req, res) => {
         id, 
         equipment_name, 
         equipment_type, 
+        manufacturer,
         gse_status,
         gse_status_updated_at,
         maintenance_type,
@@ -1580,7 +1577,10 @@ app.get('/api/gse-status', authenticateToken, async (req, res) => {
         last_service_date,
         next_service_date,
         current_hours,
-        target_hours
+        target_hours,
+        contact_person,
+        contact_phone,
+        contact_email
       FROM gse_maintenance
       ORDER BY equipment_name
     `);
@@ -1599,6 +1599,7 @@ app.get('/api/gse-status/with-parts', authenticateToken, async (req, res) => {
         gm.id,
         gm.equipment_name,
         gm.equipment_type,
+        gm.manufacturer,
         gm.gse_status,
         gm.gse_status_updated_at,
         gm.maintenance_type,
@@ -1607,6 +1608,9 @@ app.get('/api/gse-status/with-parts', authenticateToken, async (req, res) => {
         gm.next_service_date,
         gm.current_hours,
         gm.target_hours,
+        gm.contact_person,
+        gm.contact_phone,
+        gm.contact_email,
         p.id as part_id,
         p.part_number,
         p.description,
@@ -1699,6 +1703,7 @@ app.get('/api/gse-status/export', authenticateToken, async (req, res) => {
       SELECT 
         equipment_name as 'Equipment Name',
         equipment_type as 'Equipment Type',
+        manufacturer as 'Manufacturer',
         gse_status as 'GSE Status',
         gse_status_updated_at as 'Status Updated',
         maintenance_type as 'Maintenance Type',
@@ -1706,7 +1711,10 @@ app.get('/api/gse-status/export', authenticateToken, async (req, res) => {
         last_service_date as 'Last Service Date',
         next_service_date as 'Next Service Date',
         current_hours as 'Current Hours',
-        target_hours as 'Target Hours'
+        target_hours as 'Target Hours',
+        contact_person as 'Contact Person',
+        contact_phone as 'Contact Phone',
+        contact_email as 'Contact Email'
       FROM gse_maintenance
       ORDER BY equipment_name
     `);
@@ -1804,6 +1812,50 @@ app.get('/api/migrate/gse-status', authenticateToken, async (req, res) => {
     }
 
     try {
+      await db.execute("ALTER TABLE gse_maintenance ADD COLUMN manufacturer TEXT");
+      results.push({ action: 'Added column manufacturer', status: 'success' });
+    } catch (err) {
+      if (err.message.includes('duplicate column name')) {
+        results.push({ action: 'Column manufacturer already exists', status: 'skipped' });
+      } else {
+        results.push({ action: 'Error adding manufacturer', error: err.message, status: 'failed' });
+      }
+    }
+
+    try {
+      await db.execute("ALTER TABLE gse_maintenance ADD COLUMN contact_person TEXT");
+      results.push({ action: 'Added column contact_person', status: 'success' });
+    } catch (err) {
+      if (err.message.includes('duplicate column name')) {
+        results.push({ action: 'Column contact_person already exists', status: 'skipped' });
+      } else {
+        results.push({ action: 'Error adding contact_person', error: err.message, status: 'failed' });
+      }
+    }
+
+    try {
+      await db.execute("ALTER TABLE gse_maintenance ADD COLUMN contact_phone TEXT");
+      results.push({ action: 'Added column contact_phone', status: 'success' });
+    } catch (err) {
+      if (err.message.includes('duplicate column name')) {
+        results.push({ action: 'Column contact_phone already exists', status: 'skipped' });
+      } else {
+        results.push({ action: 'Error adding contact_phone', error: err.message, status: 'failed' });
+      }
+    }
+
+    try {
+      await db.execute("ALTER TABLE gse_maintenance ADD COLUMN contact_email TEXT");
+      results.push({ action: 'Added column contact_email', status: 'success' });
+    } catch (err) {
+      if (err.message.includes('duplicate column name')) {
+        results.push({ action: 'Column contact_email already exists', status: 'skipped' });
+      } else {
+        results.push({ action: 'Error adding contact_email', error: err.message, status: 'failed' });
+      }
+    }
+
+    try {
       await db.execute("UPDATE gse_maintenance SET gse_status = 'In-Service' WHERE gse_status IS NULL");
       results.push({ action: 'Updated existing records to In-Service', status: 'success' });
     } catch (err) {
@@ -1822,10 +1874,10 @@ app.get('/api/migrate/gse-status', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// 🔄 AUTO-SYNC: Part to Maintenance
+// 🔄 AUTO-SYNC: Part to Maintenance (ONLY Part #, Description, Manufacturer)
 // ============================================================
 
-// Sync a part to maintenance (auto-create maintenance record)
+// Sync a single part - ONLY copy Part #, Description, Manufacturer
 app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, res) => {
   try {
     const { part_id } = req.body;
@@ -1835,7 +1887,7 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
     }
 
     const partResult = await db.execute({
-      sql: 'SELECT * FROM parts WHERE id = ?',
+      sql: 'SELECT id, part_number, description, manufacturer FROM parts WHERE id = ?',
       args: [part_id]
     });
 
@@ -1846,7 +1898,7 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
     const part = partResult.rows[0];
 
     const existing = await db.execute({
-      sql: 'SELECT * FROM gse_maintenance WHERE part_id = ?',
+      sql: 'SELECT id FROM gse_maintenance WHERE part_id = ?',
       args: [part_id]
     });
 
@@ -1856,26 +1908,14 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
           UPDATE gse_maintenance SET 
             equipment_name = ?,
             equipment_type = ?,
-            maintenance_type = ?,
-            service_interval_hours = ?,
-            service_interval_months = ?,
-            service_interval_years = ?,
-            contact_person = ?,
-            contact_phone = ?,
-            contact_email = ?,
+            manufacturer = ?,
             updated_at = CURRENT_TIMESTAMP
           WHERE part_id = ?
         `,
         args: [
           part.part_number,
-          part.description || 'GSE Equipment',
-          part.maintenance_type || 'none',
-          part.service_interval_hours || 0,
-          part.service_interval_months || 0,
-          part.service_interval_years || 0,
-          part.contact_person || '',
-          part.contact_phone || '',
-          part.contact_email || '',
+          part.description || '',
+          part.manufacturer || '',
           part_id
         ]
       });
@@ -1883,7 +1923,11 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
       return res.json({
         success: true,
         message: `Maintenance record updated for ${part.part_number}`,
-        part_id: part_id
+        copied_fields: {
+          part_number: part.part_number,
+          description: part.description || '',
+          manufacturer: part.manufacturer || ''
+        }
       });
     }
 
@@ -1892,6 +1936,7 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
         INSERT INTO gse_maintenance (
           equipment_name,
           equipment_type,
+          manufacturer,
           part_id,
           maintenance_type,
           gse_status,
@@ -1904,21 +1949,22 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
           created_by,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id
       `,
       args: [
         part.part_number,
-        part.description || 'GSE Equipment',
+        part.description || '',
+        part.manufacturer || '',
         part_id,
-        part.maintenance_type || 'none',
+        'none',
         'In-Service',
-        part.service_interval_hours || 0,
-        part.service_interval_months || 0,
-        part.service_interval_years || 0,
-        part.contact_person || '',
-        part.contact_phone || '',
-        part.contact_email || '',
+        0,
+        0,
+        0,
+        NULL,
+        NULL,
+        NULL,
         req.user.username
       ]
     });
@@ -1926,7 +1972,12 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
     res.status(201).json({
       success: true,
       message: `Maintenance record created for ${part.part_number}`,
-      maintenance_id: result.rows[0].id
+      maintenance_id: result.rows[0].id,
+      copied_fields: {
+        part_number: part.part_number,
+        description: part.description || '',
+        manufacturer: part.manufacturer || ''
+      }
     });
   } catch (err) {
     console.error('Error syncing part to maintenance:', err.message);
@@ -1934,11 +1985,11 @@ app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, r
   }
 });
 
-// Sync all parts to maintenance (bulk sync)
+// Sync ALL parts - ONLY copy Part #, Description, Manufacturer
 app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, res) => {
   try {
     const partsResult = await db.execute({
-      sql: 'SELECT * FROM parts ORDER BY id',
+      sql: 'SELECT id, part_number, description, manufacturer FROM parts ORDER BY id',
       args: []
     });
 
@@ -1957,20 +2008,14 @@ app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, r
             UPDATE gse_maintenance SET 
               equipment_name = ?,
               equipment_type = ?,
-              maintenance_type = ?,
-              service_interval_hours = ?,
-              service_interval_months = ?,
-              service_interval_years = ?,
+              manufacturer = ?,
               updated_at = CURRENT_TIMESTAMP
             WHERE part_id = ?
           `,
           args: [
             part.part_number,
-            part.description || 'GSE Equipment',
-            part.maintenance_type || 'none',
-            part.service_interval_hours || 0,
-            part.service_interval_months || 0,
-            part.service_interval_years || 0,
+            part.description || '',
+            part.manufacturer || '',
             part.id
           ]
         });
@@ -1981,6 +2026,7 @@ app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, r
             INSERT INTO gse_maintenance (
               equipment_name,
               equipment_type,
+              manufacturer,
               part_id,
               maintenance_type,
               gse_status,
@@ -1993,20 +2039,21 @@ app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, r
               created_by,
               created_at,
               updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           `,
           args: [
             part.part_number,
-            part.description || 'GSE Equipment',
+            part.description || '',
+            part.manufacturer || '',
             part.id,
-            part.maintenance_type || 'none',
+            'none',
             'In-Service',
-            part.service_interval_hours || 0,
-            part.service_interval_months || 0,
-            part.service_interval_years || 0,
-            part.contact_person || '',
-            part.contact_phone || '',
-            part.contact_email || '',
+            0,
+            0,
+            0,
+            NULL,
+            NULL,
+            NULL,
             req.user.username
           ]
         });
@@ -2019,7 +2066,8 @@ app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, r
       message: `Sync completed: ${created} created, ${updated} updated`,
       created: created,
       updated: updated,
-      total: partsResult.rows.length
+      total: partsResult.rows.length,
+      copied_fields: ['part_number', 'description', 'manufacturer']
     });
   } catch (err) {
     console.error('Error syncing all parts:', err.message);
@@ -2146,6 +2194,7 @@ const createTables = async () => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       equipment_name TEXT NOT NULL,
       equipment_type TEXT,
+      manufacturer TEXT,
       part_id INTEGER,
       maintenance_type TEXT NOT NULL DEFAULT 'none',
       gse_status TEXT DEFAULT 'In-Service',
@@ -2172,6 +2221,9 @@ const createTables = async () => {
       maintenance_category TEXT DEFAULT 'preventive',
       checklist_items TEXT,
       status TEXT DEFAULT 'serviced',
+      contact_person TEXT,
+      contact_phone TEXT,
+      contact_email TEXT,
       date_performed DATETIME,
       created_by TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
