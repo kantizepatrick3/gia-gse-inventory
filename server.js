@@ -61,7 +61,10 @@ app.get('/api/test', (req, res) => {
       priceHistory: '/api/price-history/:partId',
       dashboard: '/api/dashboard/stats',
       maintenance: '/api/gse-maintenance',
-      serviceHistory: '/api/gse-maintenance/:id/history'
+      serviceHistory: '/api/gse-maintenance/:id/history',
+      gseStatus: '/api/gse-status',
+      gseStatusSummary: '/api/gse-status/summary',
+      gseStatusExport: '/api/gse-status/export'
     }
   });
 });
@@ -381,7 +384,6 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
       args: [req.user.username, comment || 'Approved', requestId]
     });
 
-    // Determine maintenance type from notes
     let maintTypeText = '';
     if (request.notes) {
       if (request.notes.includes('🔧 Preventive') || request.notes.includes('Preventive')) {
@@ -391,13 +393,11 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
       }
     }
 
-    // Build transaction notes with maintenance type
     let transactionNotes = `Approved request #${id} - ${comment || 'Approved'}`;
     if (maintTypeText) {
       transactionNotes = `${maintTypeText} - ${transactionNotes}`;
     }
 
-    // Insert transaction
     await db.execute({
       sql: `INSERT INTO transactions 
             (part_id, transaction_type, quantity, gse_registration, technician_name, work_order, notes, created_by, created_at)
@@ -464,7 +464,6 @@ app.get('/api/parts', authenticateToken, async (req, res) => {
   }
 });
 
-// PARTS COUNT - MUST BE BEFORE /api/parts/:id
 app.get('/api/parts/count', authenticateToken, async (req, res) => {
   try {
     const result = await db.execute({
@@ -478,7 +477,6 @@ app.get('/api/parts/count', authenticateToken, async (req, res) => {
   }
 });
 
-// GET PART BY ID - MUST BE AFTER /api/parts/count
 app.get('/api/parts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -828,7 +826,6 @@ app.get('/api/transactions/issue', authenticateToken, async (req, res) => {
   }
 });
 
-// Get transaction by ID
 app.get('/api/transactions/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -957,7 +954,6 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
   }
 });
 
-// GET single maintenance record by ID
 app.get('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1015,7 +1011,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     const { id } = req.params;
     const { service_performed, technician_name, notes, service_date, current_hours, maintenance_category, months_interval, service_interval_years, target_hours } = req.body;
 
-    // Get the maintenance record
     const maintenanceResult = await db.execute({
       sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
       args: [id]
@@ -1038,15 +1033,11 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     let nextServiceYear = null;
     let status = 'serviced';
 
-    // Get intervals - prioritize manual values from request
     let intervalHours = parseInt(maintenance.service_interval_hours) || 0;
     let intervalMonths = parseInt(months_interval) || parseInt(maintenance.service_interval_months) || 0;
     let intervalYears = parseInt(service_interval_years) || parseInt(maintenance.service_interval_years) || 0;
     let targetHrs = parseInt(target_hours) || parseInt(maintenance.target_hours) || intervalHours;
 
-    // ============================================================
-    // HOUR-BASED MAINTENANCE
-    // ============================================================
     if (maintType === 'hour') {
       if (intervalHours > 0 || targetHrs > 0) {
         const effectiveTarget = targetHrs > 0 ? targetHrs : intervalHours;
@@ -1075,12 +1066,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         if (daysRemaining <= 0) status = 'overdue';
         else if (daysRemaining <= 30) status = 'due_soon';
       }
-    }
-
-    // ============================================================
-    // MONTH-BASED MAINTENANCE
-    // ============================================================
-    else if (maintType === 'month') {
+    } else if (maintType === 'month') {
       if (intervalMonths > 0) {
         const date = new Date(serviceDate);
         date.setMonth(date.getMonth() + intervalMonths);
@@ -1094,12 +1080,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         if (daysRemaining <= 0) status = 'overdue';
         else if (daysRemaining <= 30) status = 'due_soon';
       }
-    }
-
-    // ============================================================
-    // YEAR-BASED MAINTENANCE
-    // ============================================================
-    else if (maintType === 'year') {
+    } else if (maintType === 'year') {
       if (intervalYears > 0) {
         const date = new Date(serviceDate);
         date.setFullYear(date.getFullYear() + intervalYears);
@@ -1117,7 +1098,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       }
     }
 
-    // Insert into service history
     await db.execute({
       sql: `
         INSERT INTO service_history (
@@ -1141,13 +1121,9 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       ]
     });
 
-    // ============================================================
-    // BUILD DYNAMIC UPDATE QUERY - THIS IS THE FIX
-    // ============================================================
     let updateFields = [];
     let updateArgs = [];
 
-    // Always update these fields
     updateFields.push('last_service_date = ?');
     updateArgs.push(serviceDate);
 
@@ -1175,9 +1151,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     updateFields.push('status = ?');
     updateArgs.push(status);
 
-    // ============================================================
-    // UPDATE INTERVAL FIELDS IF PROVIDED IN REQUEST
-    // ============================================================
     if (months_interval && parseInt(months_interval) > 0) {
       updateFields.push('service_interval_months = ?');
       updateArgs.push(parseInt(months_interval));
@@ -1201,7 +1174,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       args: updateArgs
     });
 
-    // Get updated record
     const updatedRecord = await db.execute({
       sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
       args: [id]
@@ -1231,7 +1203,6 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
 // 🔧 MAINTENANCE ROUTES - ADDITIONAL ENDPOINTS
 // ============================================================
 
-// Update Hours
 app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1303,7 +1274,6 @@ app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) =>
   }
 });
 
-// Edit Equipment (PUT)
 app.put('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1363,7 +1333,6 @@ app.put('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete Equipment (DELETE)
 app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1401,7 +1370,6 @@ app.delete('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
 // 📎 MAINTENANCE ATTACHMENT ROUTES
 // ============================================================
 
-// Get all attachments for a maintenance record
 app.get('/api/maintenance-attachments/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1416,7 +1384,6 @@ app.get('/api/maintenance-attachments/:id', authenticateToken, async (req, res) 
   }
 });
 
-// Download attachment
 app.get('/api/maintenance-attachments/:id/download', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1431,11 +1398,8 @@ app.get('/api/maintenance-attachments/:id/download', authenticateToken, async (r
     }
 
     const attachment = result.rows[0];
-    
-    // Convert base64 to buffer
     const fileBuffer = Buffer.from(attachment.file_data, 'base64');
     
-    // Set headers for download
     res.setHeader('Content-Type', attachment.file_type || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${attachment.original_filename || attachment.filename}"`);
     res.setHeader('Content-Length', fileBuffer.length);
@@ -1447,7 +1411,6 @@ app.get('/api/maintenance-attachments/:id/download', authenticateToken, async (r
   }
 });
 
-// Upload attachment
 app.post('/api/maintenance-attachments', authenticateToken, async (req, res) => {
   try {
     const { maintenance_id, filename, original_filename, file_data, file_type, file_size } = req.body;
@@ -1489,7 +1452,6 @@ app.post('/api/maintenance-attachments', authenticateToken, async (req, res) => 
   }
 });
 
-// Delete attachment
 app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1515,6 +1477,182 @@ app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res
   } catch (err) {
     console.error('Error deleting attachment:', err.message);
     res.status(500).json({ error: 'Failed to delete attachment', details: err.message });
+  }
+});
+
+// ============================================================
+// 📊 GSE STATUS ROUTES - NEW FEATURE
+// ============================================================
+
+// Get all GSE equipment with status
+app.get('/api/gse-status', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute(`
+      SELECT 
+        id, 
+        equipment_name, 
+        equipment_type, 
+        gse_status,
+        gse_status_updated_at,
+        maintenance_type,
+        status as maintenance_status,
+        last_service_date,
+        next_service_date,
+        current_hours,
+        target_hours
+      FROM gse_maintenance
+      ORDER BY equipment_name
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching GSE status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update GSE status (In-Service / Out-of-Service)
+app.put('/api/gse-status/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { gse_status } = req.body;
+
+    if (!gse_status || !['In-Service', 'Out-of-Service'].includes(gse_status)) {
+      return res.status(400).json({ 
+        error: 'Invalid status. Must be "In-Service" or "Out-of-Service"' 
+      });
+    }
+
+    const existing = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipment not found' });
+    }
+
+    await db.execute({
+      sql: `
+        UPDATE gse_maintenance SET 
+          gse_status = ?,
+          gse_status_updated_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [gse_status, id]
+    });
+
+    const updated = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
+      args: [id]
+    });
+
+    res.json({
+      success: true,
+      message: `Status updated to "${gse_status}"`,
+      equipment: updated.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating GSE status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get status summary (for dashboard)
+app.get('/api/gse-status/summary', authenticateToken, async (req, res) => {
+  try {
+    const [total, inService, outOfService] = await Promise.all([
+      db.execute('SELECT COUNT(*) as count FROM gse_maintenance'),
+      db.execute('SELECT COUNT(*) as count FROM gse_maintenance WHERE gse_status = "In-Service"'),
+      db.execute('SELECT COUNT(*) as count FROM gse_maintenance WHERE gse_status = "Out-of-Service"')
+    ]);
+
+    res.json({
+      total: total.rows[0]?.count || 0,
+      in_service: inService.rows[0]?.count || 0,
+      out_of_service: outOfService.rows[0]?.count || 0
+    });
+  } catch (err) {
+    console.error('Error fetching GSE status summary:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Export GSE Status Report as CSV (Excel)
+app.get('/api/gse-status/export', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute(`
+      SELECT 
+        equipment_name as 'Equipment Name',
+        equipment_type as 'Equipment Type',
+        gse_status as 'GSE Status',
+        gse_status_updated_at as 'Status Updated',
+        maintenance_type as 'Maintenance Type',
+        status as 'Maintenance Status',
+        last_service_date as 'Last Service Date',
+        next_service_date as 'Next Service Date',
+        current_hours as 'Current Hours',
+        target_hours as 'Target Hours'
+      FROM gse_maintenance
+      ORDER BY equipment_name
+    `);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No equipment found to export' });
+    }
+
+    const headers = Object.keys(result.rows[0]);
+    let csv = headers.join(',') + '\n';
+    
+    for (const row of result.rows) {
+      const values = headers.map(header => {
+        let value = row[header] || '';
+        if (typeof value === 'string' && value.includes(',')) {
+          value = `"${value}"`;
+        }
+        if (header === 'GSE Status') {
+          value = value === 'In-Service' ? '✅ In-Service' : '🔴 Out-of-Service';
+        }
+        return value;
+      });
+      csv += values.join(',') + '\n';
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=gse_status_report_${new Date().toISOString().split('T')[0]}.csv`);
+    res.send(csv);
+  } catch (err) {
+    console.error('Error exporting GSE status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get GSE status history for a specific equipment
+app.get('/api/gse-status/history/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.execute({
+      sql: `
+        SELECT 
+          gse_status,
+          gse_status_updated_at
+        FROM gse_maintenance 
+        WHERE id = ?
+      `,
+      args: [id]
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipment not found' });
+    }
+
+    res.json({
+      current_status: result.rows[0].gse_status,
+      last_updated: result.rows[0].gse_status_updated_at
+    });
+  } catch (err) {
+    console.error('Error fetching GSE status history:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1639,6 +1777,8 @@ const createTables = async () => {
       equipment_type TEXT,
       part_id INTEGER,
       maintenance_type TEXT NOT NULL DEFAULT 'none',
+      gse_status TEXT DEFAULT 'In-Service',
+      gse_status_updated_at DATETIME,
       service_performed TEXT,
       technician_name TEXT,
       notes TEXT,
@@ -1844,6 +1984,9 @@ const startServer = async () => {
       console.log(`📋 Service History: /api/gse-maintenance/:id/history`);
       console.log(`💰 Price History: /api/price-history/:partId`);
       console.log(`👥 Users: /api/users`);
+      console.log(`\n📊 GSE Status: /api/gse-status`);
+      console.log(`📊 GSE Status Summary: /api/gse-status/summary`);
+      console.log(`📎 GSE Status Export: /api/gse-status/export`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
