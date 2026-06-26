@@ -222,7 +222,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     notes: ''
   });
   
-  // ========== FIX: Remove default value for service_interval_years ==========
   const [serviceData, setServiceData] = useState({
     service_performed: '',
     technician_name: '',
@@ -232,7 +231,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     target_hours: '',
     months_interval: '',
     service_interval_months: '',
-    service_interval_years: '', // ← Changed from 1 to empty string
+    service_interval_years: '',
     maintenance_category: 'preventive',
     selectedServices: [],
     customService: '',
@@ -473,7 +472,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       
       setMessage(response.data.message || '✅ Service recorded successfully!');
       setShowServiceForm(null);
-      // ========== FIX: Reset with empty values ==========
       setServiceData({
         service_performed: '',
         technician_name: '',
@@ -483,7 +481,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         target_hours: '',
         months_interval: '',
         service_interval_months: '',
-        service_interval_years: '', // ← Changed from 1 to empty string
+        service_interval_years: '',
         maintenance_category: 'preventive',
         selectedServices: [],
         customService: '',
@@ -796,31 +794,24 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                     {eq.maintenance_type === 'hour' && (<button onClick={() => { setHoursUpdate({[eq.id]: eq.current_hours || 0}); setShowHoursModal(eq); }} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📝 Update Hours</button>)}
                     <button onClick={() => { setShowAttachmentsModal(eq); fetchAttachments(eq.id); }} style={{ backgroundColor: '#9b59b6', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📎 Files</button>
                     <button onClick={() => openEditModal(eq)} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>✏️ Edit</button>
-                    {!isNoMaintenance && (
-                      <button onClick={() => { 
-                        setShowServiceForm(eq); 
-                        // ========== FIX: Reset all fields to empty ==========
-                        setServiceData({ 
-                          service_performed: '',
-                          technician_name: '',
-                          notes: '',
-                          service_date: new Date().toISOString().split('T')[0], 
-                          current_hours: '', // ← Empty, no default
-                          target_hours: '', // ← Empty, no default
-                          months_interval: '',
-                          service_interval_months: '',
-                          service_interval_years: '', // ← Empty, no default
-                          maintenance_category: 'preventive',
-                          selectedServices: [],
-                          customService: '',
-                          customServices: []
-                        }); 
-                      }} 
-                      style={{ backgroundColor: '#3498db', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}
-                    >
-                      🔧 Record Service
-                    </button>
-                    )}
+                    {!isNoMaintenance && (<button onClick={() => { 
+                      setShowServiceForm(eq); 
+                      setServiceData({ 
+                        service_performed: '',
+                        technician_name: '',
+                        notes: '',
+                        service_date: new Date().toISOString().split('T')[0], 
+                        current_hours: '',
+                        target_hours: '',
+                        months_interval: '',
+                        service_interval_months: '',
+                        service_interval_years: '',
+                        maintenance_category: 'preventive',
+                        selectedServices: [],
+                        customService: '',
+                        customServices: []
+                      }); 
+                    }} style={{ backgroundColor: '#3498db', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>🔧 Record Service</button>)}
                     {canDelete && (<button onClick={() => handleDeleteEquipment(eq.id, eq.equipment_name)} style={{ backgroundColor: '#e74c3c', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', cursor: 'pointer' }}>🗑️ Delete</button>)}
                   </td>
                 </tr>
@@ -990,7 +981,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       )}
 
       {/* ============================================================
-          RECORD SERVICE MODAL - Corrective hides all interval fields
+          RECORD SERVICE MODAL - All three types with full preview
       ============================================================ */}
       {showServiceForm && showServiceForm.maintenance_type !== 'none' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
@@ -1097,51 +1088,203 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   </div>
                 )}
               </div>
-              
-              {/* HOUR-BASED FIELDS - ONLY FOR PREVENTIVE */}
+
+              {/* ============================================================
+                  HOUR-BASED FIELDS - WITH FULL PREVIEW
+              ============================================================ */}
               {showServiceForm.maintenance_type === 'hour' && serviceData.maintenance_category === 'preventive' && (
                 <>
                   <div style={{ marginBottom: '20px' }}>
-                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>⏱️ Current Hours (Meter Reading)</label>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                      ⏱️ Current Hours (Meter Reading) *
+                    </label>
                     <input 
                       type="number" 
-                      value={serviceData.current_hours} 
+                      value={serviceData.current_hours || ''} 
                       onChange={(e) => setServiceData({...serviceData, current_hours: e.target.value})} 
                       placeholder="Enter current meter reading" 
+                      required
                       style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
                     />
                     <small style={{ color: '#666' }}>Current hour meter reading at time of service</small>
                   </div>
+
                   <div style={{ marginBottom: '20px' }}>
-                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>🎯 Target Hours (Next service at X hours)</label>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                      🎯 Target Hours (Next service at X hours) *
+                    </label>
                     <input 
                       type="number" 
-                      value={serviceData.target_hours} 
+                      value={serviceData.target_hours || ''} 
                       onChange={(e) => setServiceData({...serviceData, target_hours: e.target.value})} 
-                      placeholder="Enter target hours for next service" 
+                      placeholder="Enter target hours for next service (e.g., 250, 500, 1000)" 
+                      required
                       style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
                     />
-                    <small style={{ color: '#666' }}>Example: 600 hours - system will compare current vs target</small>
+                    <small style={{ color: '#666' }}>
+                      <strong>Enter the target hours until next service (NO fixed default)</strong>
+                      <br />
+                      Current target in database: {showServiceForm.target_hours || showServiceForm.service_interval_hours || 'Not set'} hours
+                    </small>
                   </div>
+
                   <div style={{ marginBottom: '20px' }}>
-                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Months Interval (Optional - for date-based condition)</label>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                      📅 Months Interval (Optional - for date-based condition)
+                    </label>
                     <input 
                       type="number" 
-                      value={serviceData.months_interval} 
-                      onChange={(e) => setServiceData({...serviceData, months_interval: e.target.value})} 
-                      placeholder="Enter months for date-based condition" 
+                      value={serviceData.months_interval || ''} 
+                      onChange={(e) => {
+                        const interval = e.target.value;
+                        setServiceData({
+                          ...serviceData, 
+                          months_interval: interval
+                        });
+                      }} 
+                      placeholder="Enter months for date-based condition (e.g., 6)" 
                       style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
                     />
-                    <small style={{ color: '#666' }}>Example: 6 months - next service date will be calculated automatically</small>
+                    <small style={{ color: '#666' }}>
+                      Enter 0 or leave empty for hours only, or enter months for dual condition
+                      <br />
+                      Current interval in database: {showServiceForm.service_interval_months || 'Not set'} months
+                    </small>
+                  </div>
+
+                  {/* HOUR-BASED CALCULATION PREVIEW */}
+                  <div style={{ 
+                    marginBottom: '20px', 
+                    padding: '15px', 
+                    backgroundColor: '#e8f4fd', 
+                    borderRadius: '8px', 
+                    border: '2px solid #2196f3',
+                    boxShadow: '0 2px 4px rgba(33, 150, 243, 0.15)'
+                  }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}>
+                      <div>
+                        <span style={{ color: '#666', fontSize: '12px' }}>⏱️ Current Hours:</span>
+                        <div style={{ fontWeight: 'bold', fontSize: '15px' }}>
+                          {serviceData.current_hours || '?'}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '24px', color: '#2196f3' }}>→</div>
+                      <div>
+                        <span style={{ color: '#666', fontSize: '12px' }}>🎯 Target Hours:</span>
+                        <div style={{ fontWeight: 'bold', fontSize: '15px' }}>
+                          {serviceData.target_hours || '?'}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '24px', color: '#2196f3' }}>→</div>
+                      <div style={{ 
+                        backgroundColor: serviceData.current_hours && serviceData.target_hours && parseInt(serviceData.target_hours) > parseInt(serviceData.current_hours)
+                          ? '#e8f5e9' 
+                          : '#f5f5f5',
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        border: serviceData.current_hours && serviceData.target_hours && parseInt(serviceData.target_hours) > parseInt(serviceData.current_hours)
+                          ? '2px solid #27ae60'
+                          : '2px dashed #ccc'
+                      }}>
+                        <span style={{ color: '#666', fontSize: '12px' }}>⏳ Hours Remaining:</span>
+                        <div style={{ 
+                          fontWeight: 'bold', 
+                          fontSize: '16px',
+                          color: serviceData.current_hours && serviceData.target_hours && parseInt(serviceData.target_hours) > parseInt(serviceData.current_hours)
+                            ? '#27ae60'
+                            : serviceData.current_hours && serviceData.target_hours && parseInt(serviceData.target_hours) <= parseInt(serviceData.current_hours)
+                              ? '#e74c3c'
+                              : '#999'
+                        }}>
+                          {serviceData.current_hours && serviceData.target_hours 
+                            ? `${parseInt(serviceData.target_hours) - parseInt(serviceData.current_hours)} hours`
+                            : 'Enter values to calculate'}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {serviceData.months_interval && parseInt(serviceData.months_interval) > 0 && serviceData.service_date && (
+                      <div style={{ 
+                        marginTop: '10px', 
+                        padding: '10px 15px', 
+                        backgroundColor: '#fff3e0', 
+                        borderRadius: '4px',
+                        border: '1px solid #ffe0b2',
+                        fontSize: '13px'
+                      }}>
+                        <strong>📅 Date-based condition (Dual Mode):</strong>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '10px',
+                          marginTop: '5px'
+                        }}>
+                          <span>
+                            Service Date: <strong>{new Date(serviceData.service_date).toLocaleDateString('en-US', {
+                              year: 'numeric', month: 'short', day: 'numeric'
+                            })}</strong>
+                          </span>
+                          <span style={{ fontSize: '20px', color: '#f39c12' }}>+</span>
+                          <span>
+                            {serviceData.months_interval} month{parseInt(serviceData.months_interval) > 1 ? 's' : ''}
+                          </span>
+                          <span style={{ fontSize: '20px', color: '#f39c12' }}>→</span>
+                          <span style={{ 
+                            backgroundColor: '#e8f5e9', 
+                            padding: '4px 12px', 
+                            borderRadius: '4px',
+                            fontWeight: 'bold',
+                            color: '#27ae60'
+                          }}>
+                            {new Date(new Date(serviceData.service_date).setMonth(
+                              new Date(serviceData.service_date).getMonth() + parseInt(serviceData.months_interval)
+                            )).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#795548', marginTop: '5px' }}>
+                          ⚠️ Service is due when EITHER hours OR date condition is met (whichever comes first)
+                        </div>
+                      </div>
+                    )}
+                    
+                    {serviceData.months_interval && parseInt(serviceData.months_interval) > 0 && !serviceData.service_date && (
+                      <div style={{ 
+                        marginTop: '10px', 
+                        padding: '10px 15px', 
+                        backgroundColor: '#fff3e0', 
+                        borderRadius: '4px',
+                        border: '1px solid #ffe0b2',
+                        fontSize: '13px',
+                        color: '#e65100'
+                      }}>
+                        ⚠️ Please enter a Service Date to calculate the date-based condition.
+                      </div>
+                    )}
                   </div>
                 </>
               )}
-              
-              {/* MONTH-BASED FIELDS - ONLY FOR PREVENTIVE */}
+
+              {/* ============================================================
+                  MONTH-BASED FIELDS - WITH FULL PREVIEW
+              ============================================================ */}
               {showServiceForm.maintenance_type === 'month' && serviceData.maintenance_category === 'preventive' && (
                 <>
                   <div style={{ marginBottom: '20px' }}>
-                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📅 Service Interval (months) *</label>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                      📅 Service Interval (months) *
+                    </label>
                     <input 
                       type="number" 
                       value={serviceData.months_interval || ''} 
@@ -1166,7 +1309,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                     </small>
                   </div>
 
-                  {/* CALCULATION PREVIEW - Full version */}
+                  {/* MONTH-BASED CALCULATION PREVIEW */}
                   <div style={{ 
                     marginBottom: '20px', 
                     padding: '15px', 
@@ -1234,12 +1377,16 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   </div>
                 </>
               )}
-              
-              {/* YEAR-BASED FIELDS - ONLY FOR PREVENTIVE */}
+
+              {/* ============================================================
+                  YEAR-BASED FIELDS - WITH FULL PREVIEW
+              ============================================================ */}
               {showServiceForm.maintenance_type === 'year' && serviceData.maintenance_category === 'preventive' && (
                 <>
                   <div style={{ marginBottom: '20px' }}>
-                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>📆 Service Interval (years) *</label>
+                    <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                      📆 Service Interval (years) *
+                    </label>
                     <input 
                       type="number" 
                       value={serviceData.service_interval_years || ''} 
@@ -1263,7 +1410,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                     </small>
                   </div>
 
-                  {/* CALCULATION PREVIEW - Full version */}
+                  {/* YEAR-BASED CALCULATION PREVIEW */}
                   <div style={{ 
                     marginBottom: '20px', 
                     padding: '15px', 
@@ -1556,7 +1703,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                       target_hours: '', 
                       months_interval: '', 
                       service_interval_months: '', 
-                      service_interval_years: '', // ← Changed from 1 to empty string
+                      service_interval_years: '',
                       maintenance_category: 'preventive',
                       selectedServices: [],
                       customService: '',
