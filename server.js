@@ -64,7 +64,8 @@ app.get('/api/test', (req, res) => {
       serviceHistory: '/api/gse-maintenance/:id/history',
       gseStatus: '/api/gse-status',
       gseStatusSummary: '/api/gse-status/summary',
-      gseStatusExport: '/api/gse-status/export'
+      gseStatusExport: '/api/gse-status/export',
+      syncAllParts: '/api/gse-maintenance/sync-all-parts'
     }
   });
 });
@@ -539,7 +540,53 @@ app.post('/api/parts', authenticateToken, async (req, res) => {
       ]
     });
 
-    res.status(201).json({ success: true, message: `Part "${part_number}" added successfully`, id: result.rows[0].id });
+    const partId = result.rows[0].id;
+
+    // AUTO-CREATE MAINTENANCE RECORD
+    try {
+      await db.execute({
+        sql: `
+          INSERT INTO gse_maintenance (
+            equipment_name,
+            equipment_type,
+            part_id,
+            maintenance_type,
+            gse_status,
+            service_interval_hours,
+            service_interval_months,
+            service_interval_years,
+            contact_person,
+            contact_phone,
+            contact_email,
+            created_by,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `,
+        args: [
+          part_number,
+          description || 'GSE Equipment',
+          partId,
+          maintenance_type || 'none',
+          'In-Service',
+          service_interval_hours || 0,
+          service_interval_months || 0,
+          service_interval_years || 0,
+          contact_person || '',
+          contact_phone || '',
+          contact_email || '',
+          req.user.username
+        ]
+      });
+    } catch (syncErr) {
+      console.log('Auto-sync to maintenance failed:', syncErr.message);
+    }
+
+    res.status(201).json({ 
+      success: true, 
+      message: `Part "${part_number}" added successfully`, 
+      id: result.rows[0].id 
+    });
   } catch (err) {
     console.error('Error adding part:', err.message);
     res.status(500).json({ error: 'Failed to add part', details: err.message });
@@ -578,6 +625,40 @@ app.put('/api/parts/:id', authenticateToken, async (req, res) => {
         contact_email || '', partId
       ]
     });
+
+    // AUTO-UPDATE MAINTENANCE RECORD
+    try {
+      await db.execute({
+        sql: `
+          UPDATE gse_maintenance SET 
+            equipment_name = ?,
+            equipment_type = ?,
+            maintenance_type = ?,
+            service_interval_hours = ?,
+            service_interval_months = ?,
+            service_interval_years = ?,
+            contact_person = ?,
+            contact_phone = ?,
+            contact_email = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE part_id = ?
+        `,
+        args: [
+          (await db.execute({ sql: 'SELECT part_number FROM parts WHERE id = ?', args: [partId] })).rows[0].part_number,
+          description || 'GSE Equipment',
+          maintenance_type || 'none',
+          service_interval_hours || 0,
+          service_interval_months || 0,
+          service_interval_years || 0,
+          contact_person || '',
+          contact_phone || '',
+          contact_email || '',
+          partId
+        ]
+      });
+    } catch (syncErr) {
+      console.log('Auto-sync to maintenance failed:', syncErr.message);
+    }
 
     res.json({ success: true, message: 'Part updated successfully' });
   } catch (err) {
@@ -1481,7 +1562,7 @@ app.delete('/api/maintenance-attachment/:id', authenticateToken, async (req, res
 });
 
 // ============================================================
-// 📊 GSE STATUS ROUTES - NEW FEATURE
+// 📊 GSE STATUS ROUTES
 // ============================================================
 
 // Get all GSE equipment with status
@@ -1506,6 +1587,39 @@ app.get('/api/gse-status', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching GSE status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get GSE Status with part details
+app.get('/api/gse-status/with-parts', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.execute(`
+      SELECT 
+        gm.id,
+        gm.equipment_name,
+        gm.equipment_type,
+        gm.gse_status,
+        gm.gse_status_updated_at,
+        gm.maintenance_type,
+        gm.status as maintenance_status,
+        gm.last_service_date,
+        gm.next_service_date,
+        gm.current_hours,
+        gm.target_hours,
+        p.id as part_id,
+        p.part_number,
+        p.description,
+        p.quantity_on_hand,
+        p.min_stock,
+        p.location_bin
+      FROM gse_maintenance gm
+      LEFT JOIN parts p ON gm.part_id = p.id
+      ORDER BY gm.equipment_name
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching GSE status with parts:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1558,7 +1672,7 @@ app.put('/api/gse-status/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get status summary (for dashboard)
+// Get status summary
 app.get('/api/gse-status/summary', authenticateToken, async (req, res) => {
   try {
     const [total, inService, outOfService] = await Promise.all([
@@ -1578,7 +1692,7 @@ app.get('/api/gse-status/summary', authenticateToken, async (req, res) => {
   }
 });
 
-// Export GSE Status Report as CSV (Excel)
+// Export GSE Status Report as CSV
 app.get('/api/gse-status/export', authenticateToken, async (req, res) => {
   try {
     const result = await db.execute(`
@@ -1627,7 +1741,7 @@ app.get('/api/gse-status/export', authenticateToken, async (req, res) => {
   }
 });
 
-// Get GSE status history for a specific equipment
+// Get GSE status history
 app.get('/api/gse-status/history/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1652,6 +1766,263 @@ app.get('/api/gse-status/history/:id', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching GSE status history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// 🛠️ DATABASE MIGRATION - Add GSE Status Columns
+// ============================================================
+app.get('/api/migrate/gse-status', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const results = [];
+
+    try {
+      await db.execute("ALTER TABLE gse_maintenance ADD COLUMN gse_status TEXT DEFAULT 'In-Service'");
+      results.push({ action: 'Added column gse_status', status: 'success' });
+    } catch (err) {
+      if (err.message.includes('duplicate column name')) {
+        results.push({ action: 'Column gse_status already exists', status: 'skipped' });
+      } else {
+        results.push({ action: 'Error adding gse_status', error: err.message, status: 'failed' });
+      }
+    }
+
+    try {
+      await db.execute("ALTER TABLE gse_maintenance ADD COLUMN gse_status_updated_at DATETIME");
+      results.push({ action: 'Added column gse_status_updated_at', status: 'success' });
+    } catch (err) {
+      if (err.message.includes('duplicate column name')) {
+        results.push({ action: 'Column gse_status_updated_at already exists', status: 'skipped' });
+      } else {
+        results.push({ action: 'Error adding gse_status_updated_at', error: err.message, status: 'failed' });
+      }
+    }
+
+    try {
+      await db.execute("UPDATE gse_maintenance SET gse_status = 'In-Service' WHERE gse_status IS NULL");
+      results.push({ action: 'Updated existing records to In-Service', status: 'success' });
+    } catch (err) {
+      results.push({ action: 'Error updating existing records', error: err.message, status: 'failed' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Database migration completed',
+      results: results
+    });
+  } catch (err) {
+    console.error('Migration error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// 🔄 AUTO-SYNC: Part to Maintenance
+// ============================================================
+
+// Sync a part to maintenance (auto-create maintenance record)
+app.post('/api/gse-maintenance/sync-from-part', authenticateToken, async (req, res) => {
+  try {
+    const { part_id } = req.body;
+    
+    if (!part_id) {
+      return res.status(400).json({ error: 'Part ID is required' });
+    }
+
+    const partResult = await db.execute({
+      sql: 'SELECT * FROM parts WHERE id = ?',
+      args: [part_id]
+    });
+
+    if (partResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+
+    const part = partResult.rows[0];
+
+    const existing = await db.execute({
+      sql: 'SELECT * FROM gse_maintenance WHERE part_id = ?',
+      args: [part_id]
+    });
+
+    if (existing.rows.length > 0) {
+      await db.execute({
+        sql: `
+          UPDATE gse_maintenance SET 
+            equipment_name = ?,
+            equipment_type = ?,
+            maintenance_type = ?,
+            service_interval_hours = ?,
+            service_interval_months = ?,
+            service_interval_years = ?,
+            contact_person = ?,
+            contact_phone = ?,
+            contact_email = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE part_id = ?
+        `,
+        args: [
+          part.part_number,
+          part.description || 'GSE Equipment',
+          part.maintenance_type || 'none',
+          part.service_interval_hours || 0,
+          part.service_interval_months || 0,
+          part.service_interval_years || 0,
+          part.contact_person || '',
+          part.contact_phone || '',
+          part.contact_email || '',
+          part_id
+        ]
+      });
+
+      return res.json({
+        success: true,
+        message: `Maintenance record updated for ${part.part_number}`,
+        part_id: part_id
+      });
+    }
+
+    const result = await db.execute({
+      sql: `
+        INSERT INTO gse_maintenance (
+          equipment_name,
+          equipment_type,
+          part_id,
+          maintenance_type,
+          gse_status,
+          service_interval_hours,
+          service_interval_months,
+          service_interval_years,
+          contact_person,
+          contact_phone,
+          contact_email,
+          created_by,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING id
+      `,
+      args: [
+        part.part_number,
+        part.description || 'GSE Equipment',
+        part_id,
+        part.maintenance_type || 'none',
+        'In-Service',
+        part.service_interval_hours || 0,
+        part.service_interval_months || 0,
+        part.service_interval_years || 0,
+        part.contact_person || '',
+        part.contact_phone || '',
+        part.contact_email || '',
+        req.user.username
+      ]
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `Maintenance record created for ${part.part_number}`,
+      maintenance_id: result.rows[0].id
+    });
+  } catch (err) {
+    console.error('Error syncing part to maintenance:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sync all parts to maintenance (bulk sync)
+app.post('/api/gse-maintenance/sync-all-parts', authenticateToken, async (req, res) => {
+  try {
+    const partsResult = await db.execute({
+      sql: 'SELECT * FROM parts ORDER BY id',
+      args: []
+    });
+
+    let created = 0;
+    let updated = 0;
+
+    for (const part of partsResult.rows) {
+      const existing = await db.execute({
+        sql: 'SELECT id FROM gse_maintenance WHERE part_id = ?',
+        args: [part.id]
+      });
+
+      if (existing.rows.length > 0) {
+        await db.execute({
+          sql: `
+            UPDATE gse_maintenance SET 
+              equipment_name = ?,
+              equipment_type = ?,
+              maintenance_type = ?,
+              service_interval_hours = ?,
+              service_interval_months = ?,
+              service_interval_years = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE part_id = ?
+          `,
+          args: [
+            part.part_number,
+            part.description || 'GSE Equipment',
+            part.maintenance_type || 'none',
+            part.service_interval_hours || 0,
+            part.service_interval_months || 0,
+            part.service_interval_years || 0,
+            part.id
+          ]
+        });
+        updated++;
+      } else {
+        await db.execute({
+          sql: `
+            INSERT INTO gse_maintenance (
+              equipment_name,
+              equipment_type,
+              part_id,
+              maintenance_type,
+              gse_status,
+              service_interval_hours,
+              service_interval_months,
+              service_interval_years,
+              contact_person,
+              contact_phone,
+              contact_email,
+              created_by,
+              created_at,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `,
+          args: [
+            part.part_number,
+            part.description || 'GSE Equipment',
+            part.id,
+            part.maintenance_type || 'none',
+            'In-Service',
+            part.service_interval_hours || 0,
+            part.service_interval_months || 0,
+            part.service_interval_years || 0,
+            part.contact_person || '',
+            part.contact_phone || '',
+            part.contact_email || '',
+            req.user.username
+          ]
+        });
+        created++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Sync completed: ${created} created, ${updated} updated`,
+      created: created,
+      updated: updated,
+      total: partsResult.rows.length
+    });
+  } catch (err) {
+    console.error('Error syncing all parts:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1987,6 +2358,7 @@ const startServer = async () => {
       console.log(`\n📊 GSE Status: /api/gse-status`);
       console.log(`📊 GSE Status Summary: /api/gse-status/summary`);
       console.log(`📎 GSE Status Export: /api/gse-status/export`);
+      console.log(`🔄 Sync All Parts: /api/gse-maintenance/sync-all-parts`);
     });
   } catch (err) {
     console.error('❌ Server startup error:', err);
