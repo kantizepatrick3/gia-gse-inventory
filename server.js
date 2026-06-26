@@ -381,7 +381,12 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
       args: [req.user.username, comment || 'Approved', requestId]
     });
 
-    // ADD TRANSACTION RECORD
+    // ADD TRANSACTION RECORD - INCLUDING MAINTENANCE TYPE FROM REQUEST NOTES
+    let transactionNotes = `Approved request #${id} - ${comment || 'Approved'}`;
+    if (request.notes && (request.notes.includes('🔧') || request.notes.includes('🛠️') || request.notes.includes('Preventive') || request.notes.includes('Corrective'))) {
+      transactionNotes = `${request.notes} - ${transactionNotes}`;
+    }
+
     await db.execute({
       sql: `INSERT INTO transactions 
             (part_id, transaction_type, quantity, gse_registration, technician_name, work_order, notes, created_by, created_at)
@@ -393,7 +398,7 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
         request.gse_registration || '',
         request.technician_name || '',
         request.work_order || '',
-        `Approved request #${id} - ${comment || 'Approved'}`,
+        transactionNotes,
         req.user.username
       ]
     });
@@ -941,7 +946,7 @@ app.get('/api/gse-maintenance', authenticateToken, async (req, res) => {
   }
 });
 
-// GET single maintenance record by ID - FIXED: Added this endpoint
+// GET single maintenance record by ID
 app.get('/api/gse-maintenance/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1085,7 +1090,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       }
     }
 
-    // Insert into service history - FIXED: use the actual maintenance data
+    // Insert into service history
     await db.execute({
       sql: `
         INSERT INTO service_history (
