@@ -381,12 +381,23 @@ app.put('/api/approvals/:id/approve', authenticateToken, async (req, res) => {
       args: [req.user.username, comment || 'Approved', requestId]
     });
 
-    // ADD TRANSACTION RECORD - INCLUDING MAINTENANCE TYPE FROM REQUEST NOTES
-    let transactionNotes = `Approved request #${id} - ${comment || 'Approved'}`;
-    if (request.notes && (request.notes.includes('🔧') || request.notes.includes('🛠️') || request.notes.includes('Preventive') || request.notes.includes('Corrective'))) {
-      transactionNotes = `${request.notes} - ${transactionNotes}`;
+    // Determine maintenance type from notes
+    let maintTypeText = '';
+    if (request.notes) {
+      if (request.notes.includes('🔧 Preventive') || request.notes.includes('Preventive')) {
+        maintTypeText = '🔧 Preventive Maintenance';
+      } else if (request.notes.includes('🛠️ Corrective') || request.notes.includes('Corrective')) {
+        maintTypeText = '🛠️ Corrective Maintenance';
+      }
     }
 
+    // Build transaction notes with maintenance type
+    let transactionNotes = `Approved request #${id} - ${comment || 'Approved'}`;
+    if (maintTypeText) {
+      transactionNotes = `${maintTypeText} - ${transactionNotes}`;
+    }
+
+    // Insert transaction
     await db.execute({
       sql: `INSERT INTO transactions 
             (part_id, transaction_type, quantity, gse_registration, technician_name, work_order, notes, created_by, created_at)
