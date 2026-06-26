@@ -121,10 +121,10 @@ const sanitizeNumber = (value, defaultValue = 0) => {
 };
 
 // ============================================================
-// 👥 USER MANAGEMENT ROUTES
+// 👥 USER MANAGEMENT ROUTES - FIXED
 // ============================================================
 
-// GET ALL USERS
+// GET ALL USERS - Fixed (removed created_at)
 app.get('/api/users', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -133,7 +133,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
 
     console.log('👥 Fetching all users...');
     const result = await db.execute({
-      sql: 'SELECT id, username, full_name, role, email, created_at FROM users ORDER BY id',
+      sql: 'SELECT id, username, full_name, role, email FROM users ORDER BY id',
       args: []
     });
     
@@ -176,8 +176,8 @@ app.post('/api/users', authenticateToken, async (req, res) => {
 
     const result = await db.execute({
       sql: `
-        INSERT INTO users (username, password_hash, full_name, role, email, created_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO users (username, password_hash, full_name, role, email)
+        VALUES (?, ?, ?, ?, ?)
         RETURNING id, username, full_name, role, email
       `,
       args: [username, hashedPassword, full_name || username, role || 'storekeeper', email || '']
@@ -279,10 +279,10 @@ app.post('/api/admin/reset-password', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// 📤 ISSUE REQUESTS ROUTES
+// 📤 ISSUE REQUESTS ROUTES - FIXED
 // ============================================================
 
-// SUBMIT ISSUE REQUEST
+// SUBMIT ISSUE REQUEST - Fixed (added requested_by user ID)
 app.post('/api/requests/issue', authenticateToken, async (req, res) => {
   console.log('\n=== 📤 SUBMITTING ISSUE REQUEST ===');
   console.log('User:', req.user.username);
@@ -327,6 +327,7 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
       });
     }
 
+    // FIX: Insert both requested_by (user ID) and requested_by_name
     const result = await db.execute({
       sql: `
         INSERT INTO pending_issues (
@@ -337,10 +338,11 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
           technician_name,
           work_order,
           notes,
+          requested_by,
           requested_by_name,
           status,
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         RETURNING id
       `,
       args: [
@@ -351,7 +353,8 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
         technician_name || '',
         work_order || '',
         notes || '',
-        req.user.username,
+        req.user.id,        // requested_by (user ID)
+        req.user.username,  // requested_by_name (username)
         'pending'
       ]
     });
@@ -375,6 +378,7 @@ app.post('/api/requests/issue', authenticateToken, async (req, res) => {
 
   } catch (err) {
     console.error('❌ Error submitting issue request:', err.message);
+    console.error('Stack:', err.stack);
     res.status(500).json({ 
       error: 'Failed to submit issue request',
       details: err.message 
@@ -1016,7 +1020,7 @@ app.get('/api/transactions/issue', authenticateToken, async (req, res) => {
 // ============================================================
 
 // GET PENDING REQUESTS COUNT
-app.get('/api/requests/pending', authenticateToken, async (req, res) => {
+app.get('/api/requests/pending/count', authenticateToken, async (req, res) => {
   try {
     const result = await db.execute({
       sql: 'SELECT COUNT(*) as count FROM pending_issues WHERE status = "pending"',
@@ -1144,8 +1148,7 @@ const createTables = async () => {
       password_hash TEXT NOT NULL,
       full_name TEXT,
       role TEXT DEFAULT 'storekeeper',
-      email TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      email TEXT
     )`);
 
     await db.execute(`CREATE TABLE IF NOT EXISTS parts (
