@@ -61,22 +61,40 @@ const Navbar = ({ user, token, onLogout }) => {
   const [hoveredLink, setHoveredLink] = React.useState(null);
   const [isLogoutHovered, setIsLogoutHovered] = React.useState(false);
 
-  const links = [
+  // Base links for all users
+  const baseLinks = [
     { path: '/', label: '🏠 Dashboard' },
     { path: '/parts', label: '📦 Parts' },
     { path: '/receive', label: '📥 Receive' },
     { path: '/issue', label: '📤 Issue' },
-    { path: '/approvals', label: '⏳ Approvals' },
     { path: '/maintenance', label: '🔧 Maintenance' },
-    { path: '/transactions', label: '📜 Parts History' },  // ← Changed from "History" to "Parts History"
+    { path: '/transactions', label: '📜 Parts History' },
     { path: '/maintenance-history', label: '📋 Service History' },
     { path: '/price-history', label: '💰 Price History' },
     { path: '/gse-status', label: '📊 GSE Status' },
   ];
 
-  // Only show Users link for admin
+  // Admin/Manager only links
+  const adminManagerLinks = [
+    { path: '/approvals', label: '⏳ Approvals' },
+  ];
+
+  // Users link only for Admin
+  const userLinks = [
+    { path: '/users', label: '👥 Users' },
+  ];
+
+  // Build final links array based on user role
+  let links = [...baseLinks];
+
+  // Add Approvals for Admin and Manager
+  if (user?.role === 'admin' || user?.role === 'manager') {
+    links = [...links, ...adminManagerLinks];
+  }
+
+  // Add Users only for Admin
   if (user?.role === 'admin') {
-    links.push({ path: '/users', label: '👥 Users' });
+    links = [...links, ...userLinks];
   }
 
   return (
