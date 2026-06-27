@@ -1083,6 +1083,9 @@ app.get('/api/maintenance/all', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================
+// 🔧 MAINTENANCE SERVICE RECORD - UPDATED STATUS LOGIC
+// ============================================================
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1115,6 +1118,9 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     let intervalYears = parseInt(service_interval_years) || parseInt(maintenance.service_interval_years) || 0;
     let targetHrs = parseInt(target_hours) || parseInt(maintenance.target_hours) || intervalHours;
 
+    // ============================================================
+    // HOUR-BASED MAINTENANCE
+    // ============================================================
     if (maintType === 'hour') {
       if (intervalHours > 0 || targetHrs > 0) {
         const effectiveTarget = targetHrs > 0 ? targetHrs : intervalHours;
@@ -1133,17 +1139,41 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       }
       
+      // Status Logic for Hour-based (Dual)
       if (intervalHours > 0 && intervalMonths > 0) {
-        if (hoursRemaining <= 0 || daysRemaining <= 0) status = 'overdue';
-        else if (hoursRemaining <= 50 || daysRemaining <= 30) status = 'due_soon';
+        // DUAL MODE: Check both hours and date
+        if (hoursRemaining <= 0 || daysRemaining <= 0) {
+          status = 'overdue';
+        } else if (hoursRemaining <= 40 || daysRemaining <= 4) {
+          status = 'due_soon';
+        } else {
+          status = 'serviced';
+        }
       } else if (intervalHours > 0) {
-        if (hoursRemaining <= 0) status = 'overdue';
-        else if (hoursRemaining <= 50) status = 'due_soon';
+        // HOURS ONLY
+        if (hoursRemaining <= 0) {
+          status = 'overdue';
+        } else if (hoursRemaining <= 40) {
+          status = 'due_soon';
+        } else {
+          status = 'serviced';
+        }
       } else if (intervalMonths > 0) {
-        if (daysRemaining <= 0) status = 'overdue';
-        else if (daysRemaining <= 30) status = 'due_soon';
+        // DATE ONLY
+        if (daysRemaining <= 0) {
+          status = 'overdue';
+        } else if (daysRemaining <= 4) {
+          status = 'due_soon';
+        } else {
+          status = 'serviced';
+        }
       }
-    } else if (maintType === 'month') {
+    }
+
+    // ============================================================
+    // MONTH-BASED MAINTENANCE
+    // ============================================================
+    else if (maintType === 'month') {
       if (intervalMonths > 0) {
         const date = new Date(serviceDate);
         date.setMonth(date.getMonth() + intervalMonths);
@@ -1154,10 +1184,21 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         const diffTime = nextDate - today;
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        if (daysRemaining <= 0) status = 'overdue';
-        else if (daysRemaining <= 30) status = 'due_soon';
+        // Status Logic for Month-based
+        if (daysRemaining <= 0) {
+          status = 'overdue';
+        } else if (daysRemaining <= 30) {
+          status = 'due_soon';
+        } else {
+          status = 'serviced';
+        }
       }
-    } else if (maintType === 'year') {
+    }
+
+    // ============================================================
+    // YEAR-BASED MAINTENANCE
+    // ============================================================
+    else if (maintType === 'year') {
       if (intervalYears > 0) {
         const date = new Date(serviceDate);
         date.setFullYear(date.getFullYear() + intervalYears);
@@ -1170,11 +1211,18 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         const diffTime = nextDate - today;
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        if (daysRemaining <= 0) status = 'overdue';
-        else if (daysRemaining <= 60) status = 'due_soon';
+        // Status Logic for Year-based
+        if (daysRemaining <= 0) {
+          status = 'overdue';
+        } else if (daysRemaining <= 30) {
+          status = 'due_soon';
+        } else {
+          status = 'serviced';
+        }
       }
     }
 
+    // Insert into service history
     await db.execute({
       sql: `
         INSERT INTO service_history (
@@ -1198,6 +1246,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
       ]
     });
 
+    // Update maintenance record
     let updateFields = [];
     let updateArgs = [];
 
@@ -1311,7 +1360,7 @@ app.put('/api/gse-maintenance/:id/hours', authenticateToken, async (req, res) =>
     if (targetHours > 0) {
       if (hoursRemaining <= 0) {
         status = 'overdue';
-      } else if (hoursRemaining <= 50) {
+      } else if (hoursRemaining <= 40) {
         status = 'due_soon';
       } else {
         status = 'serviced';
@@ -1676,24 +1725,21 @@ app.put('/api/gse-status/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get status summary - FIXED
+// Get status summary
 app.get('/api/gse-status/summary', authenticateToken, async (req, res) => {
   try {
     console.log('📊 Fetching GSE status summary...');
     
-    // Get all equipment with status
     const allResult = await db.execute({
       sql: 'SELECT COUNT(*) as count FROM gse_maintenance',
       args: []
     });
     
-    // Get In-Service count (case insensitive)
     const inServiceResult = await db.execute({
       sql: "SELECT COUNT(*) as count FROM gse_maintenance WHERE LOWER(gse_status) = 'in-service'",
       args: []
     });
     
-    // Get Out-of-Service count (case insensitive)
     const outOfServiceResult = await db.execute({
       sql: "SELECT COUNT(*) as count FROM gse_maintenance WHERE LOWER(gse_status) = 'out-of-service'",
       args: []
@@ -1712,7 +1758,6 @@ app.get('/api/gse-status/summary', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching GSE status summary:', err.message);
-    // Return zeros instead of error
     res.json({ total: 0, in_service: 0, out_of_service: 0 });
   }
 });
