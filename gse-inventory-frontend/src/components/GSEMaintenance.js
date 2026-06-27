@@ -794,24 +794,40 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                     {eq.maintenance_type === 'hour' && (<button onClick={() => { setHoursUpdate({[eq.id]: eq.current_hours || 0}); setShowHoursModal(eq); }} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📝 Update Hours</button>)}
                     <button onClick={() => { setShowAttachmentsModal(eq); fetchAttachments(eq.id); }} style={{ backgroundColor: '#9b59b6', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📎 Files</button>
                     <button onClick={() => openEditModal(eq)} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>✏️ Edit</button>
-                    {!isNoMaintenance && (<button onClick={() => { 
-                      setShowServiceForm(eq); 
-                      setServiceData({ 
-                        service_performed: '',
-                        technician_name: '',
-                        notes: '',
-                        service_date: new Date().toISOString().split('T')[0], 
-                        current_hours: '',
-                        target_hours: '',
-                        months_interval: '',
-                        service_interval_months: '',
-                        service_interval_years: '',
-                        maintenance_category: 'preventive',
-                        selectedServices: [],
-                        customService: '',
-                        customServices: []
-                      }); 
-                    }} style={{ backgroundColor: '#3498db', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>🔧 Record Service</button>)}
+                    {!isNoMaintenance && (
+                      <button 
+                        onClick={() => { 
+                          setShowServiceForm(eq); 
+                          // Pre-populate with current equipment data
+                          setServiceData({ 
+                            service_performed: eq.service_performed || '',
+                            technician_name: eq.technician_name || '',
+                            notes: eq.notes || '',
+                            service_date: new Date().toISOString().split('T')[0], 
+                            current_hours: eq.current_hours || '',
+                            target_hours: eq.target_hours || eq.service_interval_hours || '',
+                            months_interval: eq.service_interval_months || '',
+                            service_interval_months: eq.service_interval_months || '',
+                            service_interval_years: eq.service_interval_years || '',
+                            maintenance_category: 'preventive',
+                            selectedServices: eq.service_performed ? eq.service_performed.split(', ').filter(s => s.trim()) : [],
+                            customService: '',
+                            customServices: []
+                          }); 
+                        }} 
+                        style={{ 
+                          backgroundColor: '#3498db', 
+                          color: 'white', 
+                          border: 'none', 
+                          padding: '5px 10px', 
+                          borderRadius: '3px', 
+                          marginRight: '5px', 
+                          cursor: 'pointer' 
+                        }}
+                      >
+                        🔧 Record Service
+                      </button>
+                    )}
                     {canDelete && (<button onClick={() => handleDeleteEquipment(eq.id, eq.equipment_name)} style={{ backgroundColor: '#e74c3c', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', cursor: 'pointer' }}>🗑️ Delete</button>)}
                   </td>
                 </tr>
