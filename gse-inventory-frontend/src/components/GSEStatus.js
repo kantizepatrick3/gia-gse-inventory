@@ -62,12 +62,37 @@ const GSEStatus = ({ token, user }) => {
     }
   };
 
+  // ============================================================
+  // FIXED: Export Report with proper blob handling
+  // ============================================================
   const exportReport = async () => {
     try {
-      window.open(`${API_URL}/api/gse-status/export?token=${token}`, '_blank');
+      setLoading(true);
+      const response = await axios.get(`${API_URL}/api/gse-status/export`, {
+        headers: { 
+          Authorization: `Bearer ${token}` 
+        },
+        responseType: 'blob' // Important: tells axios to handle binary data
+      });
+      
+      // Create a download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `gse_status_report_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      setMessage('✅ Report exported successfully!');
+      setTimeout(() => setMessage(''), 3000);
     } catch (err) {
+      console.error('Export error:', err);
       setError('Failed to export report');
       setTimeout(() => setError(''), 3000);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -95,16 +120,18 @@ const GSEStatus = ({ token, user }) => {
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <button
             onClick={exportReport}
+            disabled={loading}
             style={{
               backgroundColor: '#2c3e50',
               color: 'white',
               border: 'none',
               padding: '10px 20px',
               borderRadius: '5px',
-              cursor: 'pointer'
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.6 : 1
             }}
           >
-            📎 Export to Excel
+            {loading ? '⏳ Exporting...' : '📎 Export to Excel'}
           </button>
           <button
             onClick={() => { fetchEquipment(); fetchSummary(); }}
