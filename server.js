@@ -1084,7 +1084,7 @@ app.get('/api/maintenance/all', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// 🔧 MAINTENANCE SERVICE RECORD - UPDATED STATUS LOGIC
+// 🔧 MAINTENANCE SERVICE RECORD - FIXED MONTH-BASED (4 DAYS)
 // ============================================================
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   try {
@@ -1171,7 +1171,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     }
 
     // ============================================================
-    // MONTH-BASED MAINTENANCE
+    // MONTH-BASED MAINTENANCE - FIXED: Due Soon at 4 days (not 30)
     // ============================================================
     else if (maintType === 'month') {
       if (intervalMonths > 0) {
@@ -1184,10 +1184,10 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         const diffTime = nextDate - today;
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        // Status Logic for Month-based
+        // Status Logic for Month-based - Due Soon at 4 days
         if (daysRemaining <= 0) {
           status = 'overdue';
-        } else if (daysRemaining <= 30) {
+        } else if (daysRemaining <= 4) {
           status = 'due_soon';
         } else {
           status = 'serviced';
@@ -1211,7 +1211,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         const diffTime = nextDate - today;
         daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        // Status Logic for Year-based
+        // Status Logic for Year-based - Due Soon at 30 days (1 month)
         if (daysRemaining <= 0) {
           status = 'overdue';
         } else if (daysRemaining <= 30) {
