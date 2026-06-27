@@ -1084,7 +1084,7 @@ app.get('/api/maintenance/all', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// 🔧 MAINTENANCE SERVICE RECORD - FIXED MONTH-BASED (4 DAYS)
+// 🔧 MAINTENANCE SERVICE RECORD - FIXED: Corrective doesn't affect schedule
 // ============================================================
 app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res) => {
   try {
@@ -1104,6 +1104,7 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     const serviceDate = service_date || new Date().toISOString().split('T')[0];
     const hours = current_hours ? parseInt(current_hours) : (parseInt(maintenance.current_hours) || 0);
     const maintType = maintenance.maintenance_type || 'none';
+    const category = maintenance_category || 'preventive';
 
     let nextServiceDate = null;
     let nextServiceHours = 0;
@@ -1119,110 +1120,192 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
     let targetHrs = parseInt(target_hours) || parseInt(maintenance.target_hours) || intervalHours;
 
     // ============================================================
-    // HOUR-BASED MAINTENANCE
+    // ONLY CALCULATE FOR PREVENTIVE MAINTENANCE
     // ============================================================
-    if (maintType === 'hour') {
-      if (intervalHours > 0 || targetHrs > 0) {
-        const effectiveTarget = targetHrs > 0 ? targetHrs : intervalHours;
-        nextServiceHours = hours + effectiveTarget;
-        hoursRemaining = effectiveTarget;
+    let updateFields = [];
+    let updateArgs = [];
+
+    if (category === 'preventive') {
+      // ============================================================
+      // HOUR-BASED MAINTENANCE
+      // ============================================================
+      if (maintType === 'hour') {
+        if (intervalHours > 0 || targetHrs > 0) {
+          const effectiveTarget = targetHrs > 0 ? targetHrs : intervalHours;
+          nextServiceHours = hours + effectiveTarget;
+          hoursRemaining = effectiveTarget;
+        }
+        
+        if (intervalMonths > 0) {
+          const date = new Date(serviceDate);
+          date.setMonth(date.getMonth() + intervalMonths);
+          nextServiceDate = date.toISOString().split('T')[0];
+          
+          const today = new Date();
+          const nextDate = new Date(nextServiceDate);
+          const diffTime = nextDate - today;
+          daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        }
+        
+        // Status Logic for Hour-based (Dual)
+        if (intervalHours > 0 && intervalMonths > 0) {
+          if (hoursRemaining <= 0 || daysRemaining <= 0) {
+            status = 'overdue';
+          } else if (hoursRemaining <= 40 || daysRemaining <= 4) {
+            status = 'due_soon';
+          } else {
+            status = 'serviced';
+          }
+        } else if (intervalHours > 0) {
+          if (hoursRemaining <= 0) {
+            status = 'overdue';
+          } else if (hoursRemaining <= 40) {
+            status = 'due_soon';
+          } else {
+            status = 'serviced';
+          }
+        } else if (intervalMonths > 0) {
+          if (daysRemaining <= 0) {
+            status = 'overdue';
+          } else if (daysRemaining <= 4) {
+            status = 'due_soon';
+          } else {
+            status = 'serviced';
+          }
+        }
       }
+
+      // ============================================================
+      // MONTH-BASED MAINTENANCE
+      // ============================================================
+      else if (maintType === 'month') {
+        if (intervalMonths > 0) {
+          const date = new Date(serviceDate);
+          date.setMonth(date.getMonth() + intervalMonths);
+          nextServiceDate = date.toISOString().split('T')[0];
+          
+          const today = new Date();
+          const nextDate = new Date(nextServiceDate);
+          const diffTime = nextDate - today;
+          daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          if (daysRemaining <= 0) {
+            status = 'overdue';
+          } else if (daysRemaining <= 4) {
+            status = 'due_soon';
+          } else {
+            status = 'serviced';
+          }
+        }
+      }
+
+      // ============================================================
+      // YEAR-BASED MAINTENANCE
+      // ============================================================
+      else if (maintType === 'year') {
+        if (intervalYears > 0) {
+          const date = new Date(serviceDate);
+          date.setFullYear(date.getFullYear() + intervalYears);
+          nextServiceDate = date.toISOString().split('T')[0];
+          nextServiceYear = date.getFullYear();
+          yearsRemaining = intervalYears;
+          
+          const today = new Date();
+          const nextDate = new Date(nextServiceDate);
+          const diffTime = nextDate - today;
+          daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          if (daysRemaining <= 0) {
+            status = 'overdue';
+          } else if (daysRemaining <= 30) {
+            status = 'due_soon';
+          } else {
+            status = 'serviced';
+          }
+        }
+      }
+
+      // ============================================================
+      // BUILD UPDATE FIELDS FOR PREVENTIVE
+      // ============================================================
+      updateFields.push('last_service_date = ?');
+      updateArgs.push(serviceDate);
+
+      updateFields.push('current_hours = ?');
+      updateArgs.push(hours);
+
+      updateFields.push('next_service_date = ?');
+      updateArgs.push(nextServiceDate);
+
+      updateFields.push('next_service_hours = ?');
+      updateArgs.push(nextServiceHours);
+
+      updateFields.push('next_service_year = ?');
+      updateArgs.push(nextServiceYear);
+
+      updateFields.push('hours_remaining = ?');
+      updateArgs.push(hoursRemaining);
+
+      updateFields.push('days_remaining = ?');
+      updateArgs.push(daysRemaining);
+
+      updateFields.push('years_remaining = ?');
+      updateArgs.push(yearsRemaining);
+
+      updateFields.push('status = ?');
+      updateArgs.push(status);
+
+      if (months_interval && parseInt(months_interval) > 0) {
+        updateFields.push('service_interval_months = ?');
+        updateArgs.push(parseInt(months_interval));
+      }
+
+      if (service_interval_years && parseInt(service_interval_years) > 0) {
+        updateFields.push('service_interval_years = ?');
+        updateArgs.push(parseInt(service_interval_years));
+      }
+
+      if (target_hours && parseInt(target_hours) > 0) {
+        updateFields.push('target_hours = ?');
+        updateArgs.push(parseInt(target_hours));
+      }
+
+      updateFields.push('updated_at = CURRENT_TIMESTAMP');
+      updateArgs.push(id);
+
+      // Execute update for preventive
+      await db.execute({
+        sql: `UPDATE gse_maintenance SET ${updateFields.join(', ')} WHERE id = ?`,
+        args: updateArgs
+      });
+
+    } else {
+      // ============================================================
+      // CORRECTIVE MAINTENANCE - ONLY UPDATE CURRENT HOURS
+      // ============================================================
+      await db.execute({
+        sql: `
+          UPDATE gse_maintenance SET 
+            current_hours = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        args: [hours, id]
+      });
       
-      if (intervalMonths > 0) {
-        const date = new Date(serviceDate);
-        date.setMonth(date.getMonth() + intervalMonths);
-        nextServiceDate = date.toISOString().split('T')[0];
-        
-        const today = new Date();
-        const nextDate = new Date(nextServiceDate);
-        const diffTime = nextDate - today;
-        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      }
+      // Keep existing status, don't change it
+      status = maintenance.status || 'serviced';
       
-      // Status Logic for Hour-based (Dual)
-      if (intervalHours > 0 && intervalMonths > 0) {
-        // DUAL MODE: Check both hours and date
-        if (hoursRemaining <= 0 || daysRemaining <= 0) {
-          status = 'overdue';
-        } else if (hoursRemaining <= 40 || daysRemaining <= 4) {
-          status = 'due_soon';
-        } else {
-          status = 'serviced';
-        }
-      } else if (intervalHours > 0) {
-        // HOURS ONLY
-        if (hoursRemaining <= 0) {
-          status = 'overdue';
-        } else if (hoursRemaining <= 40) {
-          status = 'due_soon';
-        } else {
-          status = 'serviced';
-        }
-      } else if (intervalMonths > 0) {
-        // DATE ONLY
-        if (daysRemaining <= 0) {
-          status = 'overdue';
-        } else if (daysRemaining <= 4) {
-          status = 'due_soon';
-        } else {
-          status = 'serviced';
-        }
-      }
+      // Keep existing next service dates
+      nextServiceDate = maintenance.next_service_date;
+      nextServiceHours = maintenance.next_service_hours || 0;
+      nextServiceYear = maintenance.next_service_year;
+      daysRemaining = maintenance.days_remaining || 0;
+      hoursRemaining = maintenance.hours_remaining || 0;
+      yearsRemaining = maintenance.years_remaining || 0;
     }
 
-    // ============================================================
-    // MONTH-BASED MAINTENANCE - FIXED: Due Soon at 4 days (not 30)
-    // ============================================================
-    else if (maintType === 'month') {
-      if (intervalMonths > 0) {
-        const date = new Date(serviceDate);
-        date.setMonth(date.getMonth() + intervalMonths);
-        nextServiceDate = date.toISOString().split('T')[0];
-        
-        const today = new Date();
-        const nextDate = new Date(nextServiceDate);
-        const diffTime = nextDate - today;
-        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
-        // Status Logic for Month-based - Due Soon at 4 days
-        if (daysRemaining <= 0) {
-          status = 'overdue';
-        } else if (daysRemaining <= 4) {
-          status = 'due_soon';
-        } else {
-          status = 'serviced';
-        }
-      }
-    }
-
-    // ============================================================
-    // YEAR-BASED MAINTENANCE
-    // ============================================================
-    else if (maintType === 'year') {
-      if (intervalYears > 0) {
-        const date = new Date(serviceDate);
-        date.setFullYear(date.getFullYear() + intervalYears);
-        nextServiceDate = date.toISOString().split('T')[0];
-        nextServiceYear = date.getFullYear();
-        yearsRemaining = intervalYears;
-        
-        const today = new Date();
-        const nextDate = new Date(nextServiceDate);
-        const diffTime = nextDate - today;
-        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
-        // Status Logic for Year-based - Due Soon at 30 days (1 month)
-        if (daysRemaining <= 0) {
-          status = 'overdue';
-        } else if (daysRemaining <= 30) {
-          status = 'due_soon';
-        } else {
-          status = 'serviced';
-        }
-      }
-    }
-
-    // Insert into service history
+    // Insert into service history (always record for audit)
     await db.execute({
       sql: `
         INSERT INTO service_history (
@@ -1240,66 +1323,13 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         service_performed || '',
         technician_name || '',
         notes || '',
-        maintenance_category || 'preventive',
+        category,
         hours,
         req.user.username
       ]
     });
 
-    // Update maintenance record
-    let updateFields = [];
-    let updateArgs = [];
-
-    updateFields.push('last_service_date = ?');
-    updateArgs.push(serviceDate);
-
-    updateFields.push('current_hours = ?');
-    updateArgs.push(hours);
-
-    updateFields.push('next_service_date = ?');
-    updateArgs.push(nextServiceDate);
-
-    updateFields.push('next_service_hours = ?');
-    updateArgs.push(nextServiceHours);
-
-    updateFields.push('next_service_year = ?');
-    updateArgs.push(nextServiceYear);
-
-    updateFields.push('hours_remaining = ?');
-    updateArgs.push(hoursRemaining);
-
-    updateFields.push('days_remaining = ?');
-    updateArgs.push(daysRemaining);
-
-    updateFields.push('years_remaining = ?');
-    updateArgs.push(yearsRemaining);
-
-    updateFields.push('status = ?');
-    updateArgs.push(status);
-
-    if (months_interval && parseInt(months_interval) > 0) {
-      updateFields.push('service_interval_months = ?');
-      updateArgs.push(parseInt(months_interval));
-    }
-
-    if (service_interval_years && parseInt(service_interval_years) > 0) {
-      updateFields.push('service_interval_years = ?');
-      updateArgs.push(parseInt(service_interval_years));
-    }
-
-    if (target_hours && parseInt(target_hours) > 0) {
-      updateFields.push('target_hours = ?');
-      updateArgs.push(parseInt(target_hours));
-    }
-
-    updateFields.push('updated_at = CURRENT_TIMESTAMP');
-    updateArgs.push(id);
-
-    await db.execute({
-      sql: `UPDATE gse_maintenance SET ${updateFields.join(', ')} WHERE id = ?`,
-      args: updateArgs
-    });
-
+    // Get updated record
     const updatedRecord = await db.execute({
       sql: 'SELECT * FROM gse_maintenance WHERE id = ?',
       args: [id]
@@ -1307,7 +1337,9 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
 
     res.json({
       success: true,
-      message: 'Service recorded successfully',
+      message: category === 'preventive' 
+        ? 'Preventive service recorded successfully. Next service updated.'
+        : 'Corrective service recorded for audit. Preventive schedule unchanged.',
       data: {
         next_service_date: nextServiceDate,
         next_service_hours: nextServiceHours,
@@ -1315,7 +1347,8 @@ app.post('/api/gse-maintenance/:id/service', authenticateToken, async (req, res)
         days_remaining: daysRemaining,
         hours_remaining: hoursRemaining,
         years_remaining: yearsRemaining,
-        status: status
+        status: status,
+        maintenance_category: category
       },
       equipment: updatedRecord.rows[0]
     });
