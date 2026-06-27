@@ -34,16 +34,6 @@ const Navbar = ({ user, token, onLogout }) => {
     backgroundColor: '#34495e'
   };
 
-  const brandStyle = {
-    color: 'white',
-    textDecoration: 'none',
-    fontSize: '20px',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px'
-  };
-
   const userInfoStyle = {
     color: '#ecf0f1',
     fontSize: '14px',
@@ -78,10 +68,10 @@ const Navbar = ({ user, token, onLogout }) => {
     { path: '/issue', label: '📤 Issue' },
     { path: '/approvals', label: '⏳ Approvals' },
     { path: '/maintenance', label: '🔧 Maintenance' },
-    { path: '/transactions', label: '📜 History' },
+    { path: '/transactions', label: '📜 Parts History' },  // ← Changed from "History" to "Parts History"
     { path: '/maintenance-history', label: '📋 Service History' },
     { path: '/price-history', label: '💰 Price History' },
-    { path: '/gse-status', label: '📊 GSE Status' }, // NEW: Added GSE Status link
+    { path: '/gse-status', label: '📊 GSE Status' },
   ];
 
   // Only show Users link for admin
@@ -91,10 +81,7 @@ const Navbar = ({ user, token, onLogout }) => {
 
   return (
     <nav style={navStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-        <Link to="/" style={brandStyle}>
-          <span>✈️</span> GSE Inventory
-        </Link>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
           {links.map((link) => (
             <Link
