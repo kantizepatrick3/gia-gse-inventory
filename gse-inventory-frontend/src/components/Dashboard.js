@@ -12,7 +12,7 @@ const Dashboard = ({ token, user }) => {
     pendingApprovals: 0
   });
 
-  const API_URL = 'https://gia-gse-inventory.onrender.com';
+  const API_URL = 'https://gse-backend.onrender.com';
 
   useEffect(() => {
     fetchDashboardData();
@@ -59,8 +59,7 @@ const Dashboard = ({ token, user }) => {
       
       let pendingCount = 0;
       if (isApprover && results[3]) {
-        // FIX: Use .data.length directly (API returns array, not { requests: [...] })
-        pendingCount = results[3].data.length || 0;
+        pendingCount = results[3].data.requests?.length || 0;
       }
       
       setStats({
@@ -149,31 +148,78 @@ const Dashboard = ({ token, user }) => {
     return 'N/A';
   };
 
+  // ENHANCED ALERT REASON - Shows the most critical/earliest cause first
   const getAlertReason = (item) => {
+    // If API provides alert_reason, use it first
     if (item.alert_reason) {
       return item.alert_reason;
     }
-    if (item.maintenance_type === 'hour' && item.status === 'due_soon') {
+
+    // For hour-based maintenance - check which will expire FIRST
+    if (item.maintenance_type === 'hour') {
       const hrs = item.remaining_hours || 0;
       const days = item.days_remaining || 0;
-      if (hrs > 0 && days > 0) {
-        return `${hrs} hours OR ${days} days remaining`;
-      } else if (hrs > 0) {
-        return `${hrs} hours remaining`;
-      } else if (days > 0) {
-        return `${days} days remaining`;
+      
+      if (item.status === 'overdue') {
+        // Determine which is MORE overdue (most critical)
+        if (hrs <= 0 && days <= 0) {
+          return '⚠️ Both hours and date are overdue!';
+        } else if (hrs <= 0 && days > 0) {
+          return `🚨 Hours exceeded target (${Math.abs(hrs)} hrs overdue)`;
+        } else if (days <= 0 && hrs > 0) {
+          return `📅 Service date passed (${Math.abs(days)} days overdue)`;
+        } else if (hrs <= 0) {
+          return `Hours overdue: ${Math.abs(hrs)} hrs`;
+        } else if (days <= 0) {
+          return `Date overdue: ${Math.abs(days)} days`;
+        }
+        return 'Overdue';
       }
-    } else if (item.maintenance_type === 'hour' && item.status === 'overdue') {
-      const hrs = item.remaining_hours || 0;
-      const days = item.days_remaining || 0;
-      if (hrs <= 0 && days <= 0) {
-        return 'Both hours and date overdue';
-      } else if (hrs <= 0) {
-        return 'Hours exceeded target';
-      } else if (days <= 0) {
-        return 'Service date passed';
+      
+      if (item.status === 'due_soon') {
+        // Determine which will expire FIRST (most urgent)
+        if (hrs > 0 && days > 0) {
+          const hoursToDays = hrs / 24;
+          if (hoursToDays < days) {
+            return `⏱️ ${hrs} hours remaining (closest - ${days} days also)`;
+          } else {
+            return `📅 ${days} days remaining (closest - ${hrs} hrs also)`;
+          }
+        } else if (hrs > 0) {
+          return `⏱️ ${hrs} hours remaining`;
+        } else if (days > 0) {
+          return `📅 ${days} days remaining`;
+        }
+        return 'Due soon';
       }
     }
+
+    // For month-based maintenance
+    if (item.maintenance_type === 'month') {
+      const days = item.days_remaining || 0;
+      if (item.status === 'overdue') {
+        return `📅 ${Math.abs(days)} days overdue`;
+      }
+      if (item.status === 'due_soon') {
+        return `📅 ${days} days remaining`;
+      }
+    }
+
+    // For year-based maintenance
+    if (item.maintenance_type === 'year') {
+      const days = item.days_remaining_year || 0;
+      const years = item.years_remaining || 0;
+      if (item.status === 'overdue') {
+        return `📆 ${Math.abs(years)} years overdue`;
+      }
+      if (item.status === 'due_soon') {
+        if (days > 0 && days < 365) {
+          return `📅 ${days} days remaining this year`;
+        }
+        return '📆 Due this year';
+      }
+    }
+
     return '';
   };
 
