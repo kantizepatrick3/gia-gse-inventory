@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_URL } from '../api/config';
 
 const Transactions = ({ token }) => {
   const [transactions, setTransactions] = useState([]);
@@ -19,15 +20,13 @@ const Transactions = ({ token }) => {
     uniqueGSE: 0
   });
 
-  const API_URL = 'https://gia-gse-inventory.onrender.com';
-
   useEffect(() => {
     fetchTransactions();
   }, []);
 
   const fetchTransactions = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/transactions`, {
+      const response = await axios.get(`${API_URL}/transactions`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setTransactions(response.data);
