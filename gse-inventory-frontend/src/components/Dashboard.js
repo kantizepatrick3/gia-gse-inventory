@@ -95,6 +95,9 @@ const Dashboard = ({ token, user }) => {
     }
   };
 
+  // ============================================================
+  // NIRO FORMAT: Remaining Display
+  // ============================================================
   const getRemainingDisplay = (item) => {
     if (item.maintenance_type === 'hour') {
       const hrs = item.remaining_hours || 0;
@@ -158,7 +161,7 @@ const Dashboard = ({ token, user }) => {
   };
 
   // ============================================================
-  // NIRO FORMAT ALERT REASON
+  // NIRO FORMAT: Alert Reason - Shows the CLOSEST threshold
   // ============================================================
   const getAlertReason = (item) => {
     // If API provides alert_reason, use it first
@@ -166,26 +169,44 @@ const Dashboard = ({ token, user }) => {
       return item.alert_reason;
     }
 
-    // Hour-based maintenance
-    if (item.maintenance_type === 'hour' && item.status === 'due_soon') {
+    // For hour-based maintenance
+    if (item.maintenance_type === 'hour') {
       const hrs = item.remaining_hours || 0;
       const days = item.days_remaining || 0;
-      if (hrs > 0 && days > 0) {
-        return `${hrs} hours OR ${days} days remaining`;
-      } else if (hrs > 0) {
-        return `${hrs} hours remaining`;
-      } else if (days > 0) {
-        return `${days} days remaining`;
+      
+      // OVERDUE
+      if (item.status === 'overdue') {
+        if (hrs <= 0 && days <= 0) {
+          return 'Both hours and date overdue';
+        } else if (hrs <= 0) {
+          return 'Hours exceeded target';
+        } else if (days <= 0) {
+          return 'Service date passed';
+        }
+        return 'Overdue';
       }
-    } else if (item.maintenance_type === 'hour' && item.status === 'overdue') {
-      const hrs = item.remaining_hours || 0;
-      const days = item.days_remaining || 0;
-      if (hrs <= 0 && days <= 0) {
-        return 'Both hours and date overdue';
-      } else if (hrs <= 0) {
-        return 'Hours exceeded target';
-      } else if (days <= 0) {
-        return 'Service date passed';
+      
+      // DUE SOON - Show the CLOSEST threshold (NIRO format)
+      if (item.status === 'due_soon') {
+        const isDueSoonDays = days > 0 && days <= 4;
+        const isDueSoonHours = hrs > 0 && hrs <= 40;
+
+        if (hrs > 0 && days > 0) {
+          // Check which is CLOSER to target
+          const hoursToDays = hrs / 24;
+          if (hoursToDays < days) {
+            // Hours target is closer
+            return `${hrs} hours to target`;
+          } else {
+            // Days target is closer
+            return `${days} days to target`;
+          }
+        } else if (hrs > 0) {
+          return `${hrs} hours to target`;
+        } else if (days > 0) {
+          return `${days} days to target`;
+        }
+        return 'Due soon';
       }
     }
 
@@ -196,7 +217,7 @@ const Dashboard = ({ token, user }) => {
         return `${Math.abs(days)} days overdue`;
       }
       if (item.status === 'due_soon') {
-        return `${days} days remaining`;
+        return `${days} days to target`;
       }
     }
 
@@ -208,8 +229,8 @@ const Dashboard = ({ token, user }) => {
         return `${Math.abs(years)} years overdue`;
       }
       if (item.status === 'due_soon') {
-        if (days > 0) {
-          return `${days} days remaining`;
+        if (days > 0 && days < 365) {
+          return `${days} days to target`;
         }
         return 'Due this year';
       }
@@ -429,7 +450,7 @@ const Dashboard = ({ token, user }) => {
         )}
       </div>
 
-      {/* Maintenance Alerts Section */}
+      {/* Maintenance Alerts Section - NIRO Format */}
       <div style={{
         backgroundColor: '#f9f9f9',
         borderRadius: '8px',
@@ -474,7 +495,7 @@ const Dashboard = ({ token, user }) => {
                       <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold', color: statusStyle.color }}>
                         {remainingDisplay}
                       </td>
-                      <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', color: statusStyle.color }}>
+                      <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', color: statusStyle.color, fontWeight: 'bold' }}>
                         {alertReason || 'No alert reason available'}
                       </td>
                       <td style={{ border: '1px solid #ddd', padding: '8px' }}>
