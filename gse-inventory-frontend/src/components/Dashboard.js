@@ -21,7 +21,6 @@ const Dashboard = ({ token, user }) => {
     try {
       setError('');
       
-      // Run ALL API calls in PARALLEL - this is the key performance fix!
       const promises = [
         axios.get(`${API_URL}/reports/low-stock`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -34,7 +33,6 @@ const Dashboard = ({ token, user }) => {
         })
       ];
       
-      // Add pending approvals for approvers
       const isApprover = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'approver';
       if (isApprover) {
         promises.push(
@@ -44,10 +42,8 @@ const Dashboard = ({ token, user }) => {
         );
       }
       
-      // Execute all requests simultaneously
       const results = await Promise.all(promises);
       
-      // Parse results
       setLowStockParts(results[0].data || []);
       
       const allMaintenance = results[1].data.equipment || [];
@@ -56,13 +52,10 @@ const Dashboard = ({ token, user }) => {
       );
       setMaintenanceAlerts(alerts);
       
-      // FIX: Better pending approvals count handling
       let pendingCount = 0;
       if (isApprover && results[3]) {
         const pendingData = results[3].data;
-        console.log('📋 Pending approvals data:', pendingData); // Debug log
         
-        // Try multiple data structures
         if (Array.isArray(pendingData)) {
           pendingCount = pendingData.length;
         } else if (pendingData.requests && Array.isArray(pendingData.requests)) {
@@ -75,21 +68,7 @@ const Dashboard = ({ token, user }) => {
           pendingCount = pendingData.count;
         } else if (pendingData.total !== undefined) {
           pendingCount = pendingData.total;
-        } else if (pendingData.length !== undefined) {
-          pendingCount = pendingData.length;
-        } else {
-          // If we got a response but don't know the structure, try to find an array
-          console.warn('⚠️ Unknown pending approvals structure:', pendingData);
-          // Try to count any array-like property
-          for (const key in pendingData) {
-            if (Array.isArray(pendingData[key]) && pendingData[key].length > 0) {
-              pendingCount = pendingData[key].length;
-              console.log(`✅ Found array in property '${key}' with ${pendingCount} items`);
-              break;
-            }
-          }
         }
-        console.log('📊 Pending approvals count:', pendingCount);
       }
       
       setStats({
@@ -116,99 +95,54 @@ const Dashboard = ({ token, user }) => {
     }
   };
 
-  const getRemainingDisplay = (item) => {
-    if (item.maintenance_type === 'hour') {
-      const hrs = item.remaining_hours || 0;
-      const days = item.days_remaining || 0;
-      
-      if (item.status === 'overdue') {
-        if (hrs > 0 && days > 0) {
-          return `${Math.abs(hrs)} hours overdue / ${Math.abs(days)} days overdue`;
-        } else if (hrs > 0) {
-          return `${Math.abs(hrs)} hours overdue`;
-        } else if (days > 0) {
-          return `${Math.abs(days)} days overdue`;
-        }
-        return 'Overdue';
-      }
-      if (item.status === 'due_soon') {
-        if (hrs > 0 && days > 0) {
-          return `${hrs} hours / ${days} days remaining`;
-        } else if (hrs > 0) {
-          return `${hrs} hours remaining`;
-        } else if (days > 0) {
-          return `${days} days remaining`;
-        }
-        return 'Due soon';
-      }
-      if (hrs > 0 && days > 0) {
-        return `${hrs} hours / ${days} days until service`;
-      } else if (hrs > 0) {
-        return `${hrs} hours until service`;
-      } else if (days > 0) {
-        return `${days} days until service`;
-      }
-      return 'Up to date';
-    } else if (item.maintenance_type === 'month') {
-      const days = item.days_remaining || 0;
-      if (item.status === 'overdue') {
-        return `${Math.abs(days)} days overdue`;
-      }
-      if (item.status === 'due_soon') {
-        return `${days} days remaining`;
-      }
-      return `${days} days until service`;
-    } else if (item.maintenance_type === 'year') {
-      const days = item.days_remaining_year || 0;
-      const years = item.years_remaining || 0;
-      if (item.status === 'overdue') {
-        return `${Math.abs(years)} years overdue`;
-      }
-      if (item.status === 'due_soon') {
-        if (days > 0) {
-          return `${days} days remaining`;
-        }
-        return 'Due this year';
-      }
-      if (days > 0 && days < 365) {
-        return `${days} days until service`;
-      }
-      return `${years} years until service`;
-    }
-    return 'N/A';
-  };
-
-  // ENHANCED ALERT REASON - Shows the most critical/earliest cause first
+  // Get detailed alert reason for maintenance with specific thresholds
   const getAlertReason = (item) => {
     // If API provides alert_reason, use it first
     if (item.alert_reason) {
       return item.alert_reason;
     }
 
-    // For hour-based maintenance - check which will expire FIRST
+    // For hour-based maintenance
     if (item.maintenance_type === 'hour') {
       const hrs = item.remaining_hours || 0;
       const days = item.days_remaining || 0;
       
+      // OVERDUE - Specific reasons
       if (item.status === 'overdue') {
-        // Determine which is MORE overdue (most critical)
         if (hrs <= 0 && days <= 0) {
-          return '⚠️ Both hours and date are overdue!';
+          return '⚠️ BOTH HOURS AND DATE ARE OVERDUE!';
         } else if (hrs <= 0 && days > 0) {
-          return `🚨 Hours exceeded target (${Math.abs(hrs)} hrs overdue)`;
+          return `🚨 HOURS EXCEEDED TARGET: ${Math.abs(hrs)} hrs overdue (Date target still valid - ${days} days)`;
         } else if (days <= 0 && hrs > 0) {
-          return `📅 Service date passed (${Math.abs(days)} days overdue)`;
+          return `📅 DATE PASSED: ${Math.abs(days)} days overdue (Hour target still valid - ${hrs} hrs)`;
         } else if (hrs <= 0) {
-          return `Hours overdue: ${Math.abs(hrs)} hrs`;
+          return `⏱️ HOURS OVERDUE: ${Math.abs(hrs)} hrs`;
         } else if (days <= 0) {
-          return `Date overdue: ${Math.abs(days)} days`;
+          return `📅 DATE OVERDUE: ${Math.abs(days)} days`;
         }
-        return 'Overdue';
+        return '🔴 OVERDUE';
       }
       
+      // DUE SOON - Specific reasons with thresholds
       if (item.status === 'due_soon') {
-        // Determine which will expire FIRST (most urgent)
-        if (hrs > 0 && days > 0) {
+        // Check for ≤ 4 days OR ≤ 40 hours
+        const isDueSoonDays = days > 0 && days <= 4;
+        const isDueSoonHours = hrs > 0 && hrs <= 40;
+        
+        if (isDueSoonDays && isDueSoonHours) {
+          // Both are within threshold - show the closest one
+          const hoursToDays = hrs / 24;
+          if (hoursToDays < days) {
+            return `⏱️ ${hrs} hours remaining (${days} days also) - DUE SOON!`;
+          } else {
+            return `📅 ${days} days remaining (${hrs} hrs also) - DUE SOON!`;
+          }
+        } else if (isDueSoonDays) {
+          return `📅 ${days} days remaining - DUE SOON! (≤ 4 days to target)`;
+        } else if (isDueSoonHours) {
+          return `⏱️ ${hrs} hours remaining - DUE SOON! (≤ 40 hours to target)`;
+        } else if (hrs > 0 && days > 0) {
+          // Both exist but outside thresholds
           const hoursToDays = hrs / 24;
           if (hoursToDays < days) {
             return `⏱️ ${hrs} hours remaining (closest - ${days} days also)`;
@@ -220,7 +154,7 @@ const Dashboard = ({ token, user }) => {
         } else if (days > 0) {
           return `📅 ${days} days remaining`;
         }
-        return 'Due soon';
+        return '🟡 DUE SOON';
       }
     }
 
@@ -231,6 +165,9 @@ const Dashboard = ({ token, user }) => {
         return `📅 ${Math.abs(days)} days overdue`;
       }
       if (item.status === 'due_soon') {
+        if (days <= 4) {
+          return `📅 ${days} days remaining - DUE SOON! (≤ 4 days to target)`;
+        }
         return `📅 ${days} days remaining`;
       }
     }
@@ -243,6 +180,9 @@ const Dashboard = ({ token, user }) => {
         return `📆 ${Math.abs(years)} years overdue`;
       }
       if (item.status === 'due_soon') {
+        if (days > 0 && days <= 4) {
+          return `📅 ${days} days remaining - DUE SOON! (≤ 4 days to target)`;
+        }
         if (days > 0 && days < 365) {
           return `📅 ${days} days remaining this year`;
         }
@@ -417,6 +357,7 @@ const Dashboard = ({ token, user }) => {
         </div>
       </div>
 
+      {/* Low Stock Alerts Section */}
       <div style={{
         backgroundColor: '#f9f9f9',
         borderRadius: '8px',
@@ -459,6 +400,7 @@ const Dashboard = ({ token, user }) => {
         )}
       </div>
 
+      {/* Maintenance Alerts Section - With specific thresholds */}
       <div style={{
         backgroundColor: '#f9f9f9',
         borderRadius: '8px',
@@ -480,7 +422,6 @@ const Dashboard = ({ token, user }) => {
                   <th style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'left' }}>Equipment</th>
                   <th style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'left' }}>Type</th>
                   <th style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'left' }}>Maintenance Type</th>
-                  <th style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'left' }}>Remaining</th>
                   <th style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'left' }}>Alert Reason</th>
                   <th style={{ border: '1px solid #ddd', padding: '10px', textAlign: 'left' }}>Status</th>
                 </tr>
@@ -488,7 +429,6 @@ const Dashboard = ({ token, user }) => {
               <tbody>
                 {maintenanceAlerts.map(item => {
                   const statusStyle = getStatusStyle(item.status);
-                  const remainingDisplay = getRemainingDisplay(item);
                   const alertReason = getAlertReason(item);
                   
                   return (
@@ -496,11 +436,14 @@ const Dashboard = ({ token, user }) => {
                       <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold' }}>{item.equipment_name}</td>
                       <td style={{ border: '1px solid #ddd', padding: '8px' }}>{item.equipment_type || '-'}</td>
                       <td style={{ border: '1px solid #ddd', padding: '8px' }}>{getMaintenanceTypeIcon(item.maintenance_type)}</td>
-                      <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold', color: statusStyle.color }}>
-                        {remainingDisplay}
-                      </td>
-                      <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', color: statusStyle.color }}>
-                        {alertReason}
+                      <td style={{ 
+                        border: '1px solid #ddd', 
+                        padding: '8px', 
+                        fontSize: '13px', 
+                        color: statusStyle.color, 
+                        fontWeight: 'bold'
+                      }}>
+                        {alertReason || 'No alert reason available'}
                       </td>
                       <td style={{ border: '1px solid #ddd', padding: '8px' }}>
                         <span style={{ color: statusStyle.color, fontWeight: 'bold' }}>{statusStyle.text}</span>
