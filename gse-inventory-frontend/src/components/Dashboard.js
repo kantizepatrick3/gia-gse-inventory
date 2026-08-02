@@ -35,7 +35,7 @@ const Dashboard = ({ token, user }) => {
       ];
       
       // Add pending approvals for approvers
-      const isApprover = user?.role === 'admin' || user?.role === 'manager';
+      const isApprover = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'approver';
       if (isApprover) {
         promises.push(
           axios.get(`${API_URL}/requests/pending`, {
@@ -56,9 +56,40 @@ const Dashboard = ({ token, user }) => {
       );
       setMaintenanceAlerts(alerts);
       
+      // FIX: Better pending approvals count handling
       let pendingCount = 0;
       if (isApprover && results[3]) {
-        pendingCount = results[3].data.requests?.length || 0;
+        const pendingData = results[3].data;
+        console.log('📋 Pending approvals data:', pendingData); // Debug log
+        
+        // Try multiple data structures
+        if (Array.isArray(pendingData)) {
+          pendingCount = pendingData.length;
+        } else if (pendingData.requests && Array.isArray(pendingData.requests)) {
+          pendingCount = pendingData.requests.length;
+        } else if (pendingData.data && Array.isArray(pendingData.data)) {
+          pendingCount = pendingData.data.length;
+        } else if (pendingData.pending && Array.isArray(pendingData.pending)) {
+          pendingCount = pendingData.pending.length;
+        } else if (pendingData.count !== undefined) {
+          pendingCount = pendingData.count;
+        } else if (pendingData.total !== undefined) {
+          pendingCount = pendingData.total;
+        } else if (pendingData.length !== undefined) {
+          pendingCount = pendingData.length;
+        } else {
+          // If we got a response but don't know the structure, try to find an array
+          console.warn('⚠️ Unknown pending approvals structure:', pendingData);
+          // Try to count any array-like property
+          for (const key in pendingData) {
+            if (Array.isArray(pendingData[key]) && pendingData[key].length > 0) {
+              pendingCount = pendingData[key].length;
+              console.log(`✅ Found array in property '${key}' with ${pendingCount} items`);
+              break;
+            }
+          }
+        }
+        console.log('📊 Pending approvals count:', pendingCount);
       }
       
       setStats({
@@ -69,7 +100,7 @@ const Dashboard = ({ token, user }) => {
       
       setLoading(false);
     } catch (err) {
-      console.error('Error fetching dashboard data:', err);
+      console.error('❌ Error fetching dashboard data:', err);
       setError('Failed to load dashboard data. Please refresh the page.');
       setLoading(false);
     }
@@ -326,7 +357,7 @@ const Dashboard = ({ token, user }) => {
     );
   }
 
-  const isApprover = user?.role === 'admin' || user?.role === 'manager';
+  const isApprover = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'approver';
 
   return (
     <div>
