@@ -13,8 +13,6 @@ const Dashboard = ({ token, user }) => {
     pendingApprovals: 0
   });
 
-  // API_URL is now imported from config - remove the local declaration
-
   useEffect(() => {
     fetchDashboardData();
   }, []);
