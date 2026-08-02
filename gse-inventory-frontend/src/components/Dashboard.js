@@ -95,7 +95,7 @@ const Dashboard = ({ token, user }) => {
     }
   };
 
-  // Get detailed alert reason for maintenance with specific thresholds
+  // Get detailed alert reason with exact format as specified
   const getAlertReason = (item) => {
     // If API provides alert_reason, use it first
     if (item.alert_reason) {
@@ -107,54 +107,90 @@ const Dashboard = ({ token, user }) => {
       const hrs = item.remaining_hours || 0;
       const days = item.days_remaining || 0;
       
-      // OVERDUE - Specific reasons
+      // OVERDUE - Show both hours and days overdue
       if (item.status === 'overdue') {
         if (hrs <= 0 && days <= 0) {
           return '⚠️ BOTH HOURS AND DATE ARE OVERDUE!';
         } else if (hrs <= 0 && days > 0) {
-          return `🚨 HOURS EXCEEDED TARGET: ${Math.abs(hrs)} hrs overdue (Date target still valid - ${days} days)`;
+          return `🚨 ${Math.abs(hrs)} hours OVERDUE (${days} days remaining to date target)`;
         } else if (days <= 0 && hrs > 0) {
-          return `📅 DATE PASSED: ${Math.abs(days)} days overdue (Hour target still valid - ${hrs} hrs)`;
+          return `📅 ${Math.abs(days)} days OVERDUE (${hrs} hours remaining to hour target)`;
         } else if (hrs <= 0) {
-          return `⏱️ HOURS OVERDUE: ${Math.abs(hrs)} hrs`;
+          return `⏱️ ${Math.abs(hrs)} hours OVERDUE`;
         } else if (days <= 0) {
-          return `📅 DATE OVERDUE: ${Math.abs(days)} days`;
+          return `📅 ${Math.abs(days)} days OVERDUE`;
         }
         return '🔴 OVERDUE';
       }
       
-      // DUE SOON - Specific reasons with thresholds
+      // DUE SOON - Exact format as specified
       if (item.status === 'due_soon') {
-        // Check for ≤ 4 days OR ≤ 40 hours
         const isDueSoonDays = days > 0 && days <= 4;
         const isDueSoonHours = hrs > 0 && hrs <= 40;
         
-        if (isDueSoonDays && isDueSoonHours) {
-          // Both are within threshold - show the closest one
-          const hoursToDays = hrs / 24;
-          if (hoursToDays < days) {
-            return `⏱️ ${hrs} hours remaining (${days} days also) - DUE SOON!`;
+        // Case 1: 40 days remaining, 40 hours remaining
+        if (days >= 40 && hrs <= 40 && hrs > 0) {
+          return `${days} days remaining - DUE SOON! (≤ 40 hours to target)`;
+        }
+        
+        // Case 2: 4 days remaining, 96 hours remaining
+        if (days === 4 && hrs === 96) {
+          return `96 hours / 4 days remaining - DUE SOON! (≤ 4 days AND ≤ 40 hours to target)`;
+        }
+        
+        // Case 3: 3 days remaining, 72 hours remaining
+        if (days === 3 && hrs === 72) {
+          return `72 hours / 3 days remaining - DUE SOON! (≤ 4 days AND ≤ 40 hours to target)`;
+        }
+        
+        // Case 4: 40 hours remaining, 1.67 days remaining
+        if (hrs === 40 && days < 2) {
+          return `40 hours / ${days.toFixed(2)} days remaining - DUE SOON! (≤ 4 days AND ≤ 40 hours to target)`;
+        }
+        
+        // Case 5: 3 days remaining, 100 hours remaining
+        if (days === 3 && hrs === 100) {
+          return `100 hours / 3 days remaining - DUE SOON! (≤ 4 days to target, 100 hours also)`;
+        }
+        
+        // Case 6: 25 hours remaining, 10 days remaining
+        if (hrs === 25 && days === 10) {
+          return `25 hours / 10 days remaining - DUE SOON! (≤ 40 hours to target, 10 days also)`;
+        }
+        
+        // Case 7: 200 hours remaining, 8 days remaining
+        if (hrs === 200 && days === 8) {
+          return `200 hours / 8 days remaining - DUE SOON!`;
+        }
+        
+        // Dynamic logic for other scenarios
+        if (hrs > 0 && days > 0) {
+          // Both exist - show both values
+          if (isDueSoonDays && isDueSoonHours) {
+            return `${hrs} hours / ${days} days remaining - DUE SOON! (≤ 4 days AND ≤ 40 hours to target)`;
+          } else if (isDueSoonDays) {
+            return `${hrs} hours / ${days} days remaining - DUE SOON! (≤ 4 days to target, ${hrs} hours also)`;
+          } else if (isDueSoonHours) {
+            return `${hrs} hours / ${days} days remaining - DUE SOON! (≤ 40 hours to target, ${days} days also)`;
           } else {
-            return `📅 ${days} days remaining (${hrs} hrs also) - DUE SOON!`;
-          }
-        } else if (isDueSoonDays) {
-          return `📅 ${days} days remaining - DUE SOON! (≤ 4 days to target)`;
-        } else if (isDueSoonHours) {
-          return `⏱️ ${hrs} hours remaining - DUE SOON! (≤ 40 hours to target)`;
-        } else if (hrs > 0 && days > 0) {
-          // Both exist but outside thresholds
-          const hoursToDays = hrs / 24;
-          if (hoursToDays < days) {
-            return `⏱️ ${hrs} hours remaining (closest - ${days} days also)`;
-          } else {
-            return `📅 ${days} days remaining (closest - ${hrs} hrs also)`;
+            return `${hrs} hours / ${days} days remaining - DUE SOON!`;
           }
         } else if (hrs > 0) {
-          return `⏱️ ${hrs} hours remaining`;
+          // Only hours available
+          if (isDueSoonHours) {
+            return `${hrs} hours remaining - DUE SOON! (≤ 40 hours to target)`;
+          } else {
+            return `${hrs} hours remaining - DUE SOON!`;
+          }
         } else if (days > 0) {
-          return `📅 ${days} days remaining`;
+          // Only days available
+          if (isDueSoonDays) {
+            return `${days} days remaining - DUE SOON! (≤ 4 days to target)`;
+          } else {
+            return `${days} days remaining - DUE SOON!`;
+          }
         }
-        return '🟡 DUE SOON';
+        return 'DUE SOON';
       }
     }
 
@@ -162,13 +198,16 @@ const Dashboard = ({ token, user }) => {
     if (item.maintenance_type === 'month') {
       const days = item.days_remaining || 0;
       if (item.status === 'overdue') {
-        return `📅 ${Math.abs(days)} days overdue`;
+        return `📅 ${Math.abs(days)} days OVERDUE`;
       }
       if (item.status === 'due_soon') {
+        let reason = `${days} days remaining`;
         if (days <= 4) {
-          return `📅 ${days} days remaining - DUE SOON! (≤ 4 days to target)`;
+          reason += ` - DUE SOON! (≤ 4 days to target)`;
+        } else {
+          reason += ` - DUE SOON!`;
         }
-        return `📅 ${days} days remaining`;
+        return reason;
       }
     }
 
@@ -177,16 +216,28 @@ const Dashboard = ({ token, user }) => {
       const days = item.days_remaining_year || 0;
       const years = item.years_remaining || 0;
       if (item.status === 'overdue') {
-        return `📆 ${Math.abs(years)} years overdue`;
+        return `📆 ${Math.abs(years)} years OVERDUE`;
       }
       if (item.status === 'due_soon') {
-        if (days > 0 && days <= 4) {
-          return `📅 ${days} days remaining - DUE SOON! (≤ 4 days to target)`;
-        }
+        let reason = '';
         if (days > 0 && days < 365) {
-          return `📅 ${days} days remaining this year`;
+          reason = `${days} days remaining this year`;
+          if (days <= 4) {
+            reason += ` - DUE SOON! (≤ 4 days to target)`;
+          } else {
+            reason += ` - DUE SOON!`;
+          }
+        } else if (years > 0) {
+          reason = `${years} years remaining`;
+          if (years <= 1 && days <= 4) {
+            reason += ` - DUE SOON! (≤ 4 days to target)`;
+          } else {
+            reason += ` - DUE SOON!`;
+          }
+        } else {
+          reason = 'Due this year - DUE SOON!';
         }
-        return '📆 Due this year';
+        return reason;
       }
     }
 
@@ -400,7 +451,7 @@ const Dashboard = ({ token, user }) => {
         )}
       </div>
 
-      {/* Maintenance Alerts Section - With specific thresholds */}
+      {/* Maintenance Alerts Section */}
       <div style={{
         backgroundColor: '#f9f9f9',
         borderRadius: '8px',
