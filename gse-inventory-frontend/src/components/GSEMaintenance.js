@@ -1,6 +1,7 @@
 // FORCE DEPLOY: next_service_date fix - June 22, 2026
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_URL } from '../api/config';
 
 // ============================================================
 // MAINTENANCE INFO COMPONENT (Collapsible - Saves Space)
@@ -253,8 +254,6 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     last_service_year: null
   });
 
-  const API_URL = 'https://gia-gse-inventory.onrender.com';
-
   useEffect(() => {
     fetchEquipment();
     const interval = setInterval(() => {
@@ -266,7 +265,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
 
   const fetchEquipment = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/gse-maintenance`, {
+      const response = await axios.get(`${API_URL}/gse-maintenance`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setEquipment(response.data.equipment || []);
@@ -278,7 +277,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
 
   const fetchAttachments = async (maintenanceId) => {
     try {
-      const response = await axios.get(`${API_URL}/api/maintenance-attachments/${maintenanceId}`, {
+      const response = await axios.get(`${API_URL}/maintenance-attachments/${maintenanceId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setAttachments(response.data);
@@ -294,7 +293,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     reader.onloadend = async () => {
       const base64String = reader.result.split(',')[1];
       try {
-        await axios.post(`${API_URL}/api/maintenance-attachments`, {
+        await axios.post(`${API_URL}/maintenance-attachments`, {
           maintenance_id: maintenanceId,
           filename: file.name,
           original_filename: file.name,
@@ -321,7 +320,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   const handleDeleteAttachment = async (attachmentId) => {
     if (window.confirm('Delete this attachment?')) {
       try {
-        await axios.delete(`${API_URL}/api/maintenance-attachment/${attachmentId}`, {
+        await axios.delete(`${API_URL}/maintenance-attachment/${attachmentId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setMessage('✅ Attachment deleted successfully!');
@@ -338,7 +337,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
 
   const downloadAttachment = async (attachmentId, filename) => {
     try {
-      const response = await fetch(`${API_URL}/api/maintenance-attachments/${attachmentId}/download`, {
+      const response = await fetch(`${API_URL}/maintenance-attachments/${attachmentId}/download`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -363,7 +362,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
 
   const updateCurrentHours = async (equipId, currentHours) => {
     try {
-      await axios.put(`${API_URL}/api/gse-maintenance/${equipId}/hours`, {
+      await axios.put(`${API_URL}/gse-maintenance/${equipId}/hours`, {
         current_hours: parseInt(currentHours)
       }, {
         headers: { Authorization: `Bearer ${token}` }
@@ -403,7 +402,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         payload.last_service_year = parseInt(newEquipment.last_service_year);
         payload.last_service_date = newEquipment.last_service_date;
       }
-      await axios.post(`${API_URL}/api/gse-maintenance`, payload, {
+      await axios.post(`${API_URL}/gse-maintenance`, payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setMessage('✅ Equipment added to maintenance schedule!');
@@ -466,7 +465,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         maintenance_category: serviceData.maintenance_category || 'preventive'
       };
       
-      const response = await axios.post(`${API_URL}/api/gse-maintenance/${equipId}/service`, payload, {
+      const response = await axios.post(`${API_URL}/gse-maintenance/${equipId}/service`, payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -534,7 +533,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         }
       }
       
-      const response = await axios.put(`${API_URL}/api/gse-maintenance/${editData.id}`, payload, {
+      const response = await axios.put(`${API_URL}/gse-maintenance/${editData.id}`, payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -555,7 +554,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   const handleDeleteEquipment = async (equipId, equipName) => {
     if (window.confirm(`Delete "${equipName}" from maintenance schedule?`)) {
       try {
-        await axios.delete(`${API_URL}/api/gse-maintenance/${equipId}`, {
+        await axios.delete(`${API_URL}/gse-maintenance/${equipId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setMessage(`"${equipName}" removed from schedule`);
@@ -609,28 +608,59 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     }
   };
 
+  // ============================================================
+  // FIXED: Get Remaining Display - Shows both hours AND days
+  // ============================================================
   const getRemainingDisplay = (eq) => {
     if (eq.maintenance_type === 'none') return '⚪ No maintenance';
+    
     if (eq.maintenance_type === 'hour') {
       const hrs = eq.remaining_hours || 0;
       const days = eq.days_remaining || 0;
+      const targetHours = eq.target_hours || eq.service_interval_hours || 0;
+      const currentHours = eq.current_hours || 0;
+      const hoursRemaining = targetHours - currentHours;
+      
+      // OVERDUE
       if (eq.status === 'overdue') {
-        if (hrs > 0 && days > 0) return `🔴 ${Math.abs(hrs)} hrs overdue / ${Math.abs(days)} days overdue`;
-        if (hrs > 0) return `🔴 ${Math.abs(hrs)} hrs overdue`;
-        if (days > 0) return `🔴 ${Math.abs(days)} days overdue`;
+        if (hrs <= 0 && days <= 0) {
+          return `🔴 ${Math.abs(hrs)} hrs overdue / ${Math.abs(days)} days overdue`;
+        } else if (hrs <= 0 && days > 0) {
+          return `🔴 ${Math.abs(hrs)} hrs overdue (${days} days to date)`;
+        } else if (days <= 0 && hrs > 0) {
+          return `🔴 ${Math.abs(days)} days overdue (${hrs} hrs to target)`;
+        } else if (hrs <= 0) {
+          return `🔴 ${Math.abs(hrs)} hrs overdue`;
+        } else if (days <= 0) {
+          return `🔴 ${Math.abs(days)} days overdue`;
+        }
         return '🔴 OVERDUE';
       }
+      
+      // DUE SOON - Show both hours and days remaining
       if (eq.status === 'due_soon') {
-        if (hrs > 0 && days > 0) return `🟡 ${hrs} hrs remaining / ${days} days remaining - DUE SOON!`;
-        if (hrs > 0) return `🟡 ${hrs} hrs remaining - DUE SOON!`;
-        if (days > 0) return `🟡 ${days} days remaining - DUE SOON!`;
+        if (hrs > 0 && days > 0) {
+          return `🟡 ${hrs} hours / ${days} days remaining - DUE SOON!`;
+        } else if (hrs > 0) {
+          return `🟡 ${hrs} hours remaining - DUE SOON!`;
+        } else if (days > 0) {
+          return `🟡 ${days} days remaining - DUE SOON!`;
+        }
         return '🟡 DUE SOON!';
       }
-      if (hrs > 0 && days > 0) return `✅ ${hrs} hrs remaining / ${days} days remaining`;
-      if (hrs > 0) return `✅ ${hrs} hrs remaining`;
-      if (days > 0) return `✅ ${days} days remaining`;
+      
+      // SERVICED / Up to date - Show both
+      if (hrs > 0 && days > 0) {
+        return `✅ ${hrs} hours / ${days} days remaining`;
+      } else if (hrs > 0) {
+        return `✅ ${hrs} hours remaining`;
+      } else if (days > 0) {
+        return `✅ ${days} days remaining`;
+      }
       return '✅ Up to date';
     }
+    
+    // Month-based
     if (eq.maintenance_type === 'month') {
       const days = eq.days_remaining || 0;
       const weeks = (days / 7).toFixed(1);
@@ -638,12 +668,104 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       if (eq.status === 'due_soon') return `🟡 ${days} days (${weeks} weeks) - DUE SOON!`;
       return `✅ ${days} days (${weeks} weeks)`;
     }
+    
+    // Year-based
     if (eq.maintenance_type === 'year') {
       if (eq.status === 'overdue') return '🔴 OVERDUE';
       if (eq.status === 'due_soon') return '🟡 DUE THIS YEAR';
       return `✅ ${eq.years_remaining || 0} yrs`;
     }
+    
     return 'N/A';
+  };
+
+  // ============================================================
+  // FIXED: Get Alert Reason - Shows threshold information
+  // ============================================================
+  const getAlertReason = (eq) => {
+    // If API provides alert_reason, use it first
+    if (eq.alert_reason) {
+      return eq.alert_reason;
+    }
+
+    if (eq.maintenance_type === 'none') return 'No maintenance required';
+
+    if (eq.maintenance_type === 'hour') {
+      const hrs = eq.remaining_hours || 0;
+      const days = eq.days_remaining || 0;
+      const targetHours = eq.target_hours || eq.service_interval_hours || 0;
+      const currentHours = eq.current_hours || 0;
+      const hoursRemaining = targetHours - currentHours;
+
+      // OVERDUE
+      if (eq.status === 'overdue') {
+        if (hrs <= 0 && days <= 0) {
+          return '⚠️ BOTH hours AND date are overdue!';
+        } else if (hrs <= 0 && days > 0) {
+          return `🚨 ${Math.abs(hrs)} hours OVERDUE (${days} days to date)`;
+        } else if (days <= 0 && hrs > 0) {
+          return `📅 ${Math.abs(days)} days OVERDUE (${hrs} hrs to target)`;
+        } else if (hrs <= 0) {
+          return `⏱️ ${Math.abs(hrs)} hours OVERDUE`;
+        } else if (days <= 0) {
+          return `📅 ${Math.abs(days)} days OVERDUE`;
+        }
+        return '🔴 OVERDUE';
+      }
+
+      // DUE SOON - Show threshold
+      if (eq.status === 'due_soon') {
+        const isDueSoonDays = days > 0 && days <= 4;
+        const isDueSoonHours = hrs > 0 && hrs <= 40;
+
+        if (hrs > 0 && days > 0) {
+          if (isDueSoonDays && isDueSoonHours) {
+            return `DUE SOON! (${hrs} hours / ${days} days to target)`;
+          } else if (isDueSoonDays) {
+            return `DUE SOON! (≤ 4 days to target, ${hrs} hrs also)`;
+          } else if (isDueSoonHours) {
+            return `DUE SOON! (≤ 40 hours to target, ${days} days also)`;
+          }
+          return `DUE SOON! (${hrs} hrs / ${days} days remaining)`;
+        } else if (hrs > 0) {
+          return isDueSoonHours ? `DUE SOON! (≤ 40 hours to target)` : `DUE SOON! (${hrs} hrs remaining)`;
+        } else if (days > 0) {
+          return isDueSoonDays ? `DUE SOON! (≤ 4 days to target)` : `DUE SOON! (${days} days remaining)`;
+        }
+        return '🟡 DUE SOON';
+      }
+    }
+
+    // Month-based
+    if (eq.maintenance_type === 'month') {
+      const days = eq.days_remaining || 0;
+      if (eq.status === 'overdue') {
+        return `📅 ${Math.abs(days)} days OVERDUE`;
+      }
+      if (eq.status === 'due_soon') {
+        return days <= 4 ? `DUE SOON! (≤ 4 days to target)` : `DUE SOON! (${days} days remaining)`;
+      }
+    }
+
+    // Year-based
+    if (eq.maintenance_type === 'year') {
+      const days = eq.days_remaining_year || 0;
+      const years = eq.years_remaining || 0;
+      if (eq.status === 'overdue') {
+        return `📆 ${Math.abs(years)} years OVERDUE`;
+      }
+      if (eq.status === 'due_soon') {
+        if (days > 0 && days <= 4) {
+          return `DUE SOON! (≤ 4 days to target this year)`;
+        }
+        if (days > 0 && days < 365) {
+          return `DUE SOON! (${days} days remaining this year)`;
+        }
+        return 'DUE SOON! (Due this year)';
+      }
+    }
+
+    return '';
   };
 
   const getMonthPreview = (serviceDate, monthsInterval) => {
@@ -770,6 +892,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
               <th style={{ border: '1px solid #ddd', padding: '12px' }}>Current / Target</th>
               <th style={{ border: '1px solid #ddd', padding: '12px' }}>📊 Next Service</th>
               <th style={{ border: '1px solid #ddd', padding: '12px' }}>⏰ Remaining</th>
+              <th style={{ border: '1px solid #ddd', padding: '12px' }}>Alert Reason</th>
               <th style={{ border: '1px solid #ddd', padding: '12px' }}>Status</th>
               <th style={{ border: '1px solid #ddd', padding: '12px' }}>Actions</th>
             </tr>
@@ -778,6 +901,9 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
             {filteredEquipment.map(eq => {
               const statusStyle = getStatusBadge(eq.status);
               const isNoMaintenance = eq.maintenance_type === 'none';
+              const remainingDisplay = getRemainingDisplay(eq);
+              const alertReason = getAlertReason(eq);
+              
               return (
                 <tr key={eq.id} style={{ backgroundColor: statusStyle.bg }}>
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold' }}>{eq.equipment_name}</td>
@@ -788,17 +914,25 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                   <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', fontWeight: 'bold', color: statusStyle.color === '#e74c3c' ? '#e74c3c' : (statusStyle.color === '#f39c12' ? '#f39c12' : '#0066cc') }}>
                     {formatDate(eq.next_service_date)}
                   </td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold', color: statusStyle.color }}>{getRemainingDisplay(eq)}{eq.alert_reason && <div style={{ fontSize: '10px' }}>{eq.alert_reason}</div>}</td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}><span style={{ color: statusStyle.color, fontWeight: 'bold' }}>{statusStyle.text}</span></td>
+                  <td style={{ border: '1px solid #ddd', padding: '8px', fontWeight: 'bold', color: statusStyle.color }}>
+                    {remainingDisplay}
+                  </td>
+                  <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '13px', color: statusStyle.color, fontWeight: 'bold' }}>
+                    {alertReason || '✅ Up to date'}
+                  </td>
                   <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                    {eq.maintenance_type === 'hour' && (<button onClick={() => { setHoursUpdate({[eq.id]: eq.current_hours || 0}); setShowHoursModal(eq); }} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📝 Update Hours</button>)}
+                    <span style={{ color: statusStyle.color, fontWeight: 'bold' }}>{statusStyle.text}</span>
+                  </td>
+                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                    {eq.maintenance_type === 'hour' && (
+                      <button onClick={() => { setHoursUpdate({[eq.id]: eq.current_hours || 0}); setShowHoursModal(eq); }} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📝 Update Hours</button>
+                    )}
                     <button onClick={() => { setShowAttachmentsModal(eq); fetchAttachments(eq.id); }} style={{ backgroundColor: '#9b59b6', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>📎 Files</button>
                     <button onClick={() => openEditModal(eq)} style={{ backgroundColor: '#ffc107', color: '#333', border: 'none', padding: '5px 10px', borderRadius: '3px', marginRight: '5px', cursor: 'pointer' }}>✏️ Edit</button>
                     {!isNoMaintenance && (
                       <button 
                         onClick={() => { 
                           setShowServiceForm(eq); 
-                          // Pre-populate with current equipment data
                           setServiceData({ 
                             service_performed: eq.service_performed || '',
                             technician_name: eq.technician_name || '',
@@ -828,7 +962,9 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                         🔧 Record Service
                       </button>
                     )}
-                    {canDelete && (<button onClick={() => handleDeleteEquipment(eq.id, eq.equipment_name)} style={{ backgroundColor: '#e74c3c', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', cursor: 'pointer' }}>🗑️ Delete</button>)}
+                    {canDelete && (
+                      <button onClick={() => handleDeleteEquipment(eq.id, eq.equipment_name)} style={{ backgroundColor: '#e74c3c', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '3px', cursor: 'pointer' }}>🗑️ Delete</button>
+                    )}
                   </td>
                 </tr>
               );
@@ -996,9 +1132,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         </div>
       )}
 
-      {/* ============================================================
-          RECORD SERVICE MODAL - All three types with full preview
-      ============================================================ */}
+      {/* Record Service Modal */}
       {showServiceForm && showServiceForm.maintenance_type !== 'none' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '750px', maxWidth: '95%', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -1105,9 +1239,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 )}
               </div>
 
-              {/* ============================================================
-                  HOUR-BASED FIELDS - WITH FULL PREVIEW
-              ============================================================ */}
+              {/* HOUR-BASED FIELDS */}
               {showServiceForm.maintenance_type === 'hour' && serviceData.maintenance_category === 'preventive' && (
                 <>
                   <div style={{ marginBottom: '20px' }}>
@@ -1138,7 +1270,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                       style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }} 
                     />
                     <small style={{ color: '#666' }}>
-                      <strong>Enter the target hours until next service (NO fixed default)</strong>
+                      <strong>Enter the target hours until next service</strong>
                       <br />
                       Current target in database: {showServiceForm.target_hours || showServiceForm.service_interval_hours || 'Not set'} hours
                     </small>
@@ -1292,9 +1424,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </>
               )}
 
-              {/* ============================================================
-                  MONTH-BASED FIELDS - WITH FULL PREVIEW
-              ============================================================ */}
+              {/* MONTH-BASED FIELDS */}
               {showServiceForm.maintenance_type === 'month' && serviceData.maintenance_category === 'preventive' && (
                 <>
                   <div style={{ marginBottom: '20px' }}>
@@ -1319,7 +1449,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                       style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }}
                     />
                     <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
-                      <strong>Enter the number of months until next service (NO fixed default)</strong>
+                      <strong>Enter the number of months until next service</strong>
                       <br />
                       Current interval in database: {showServiceForm.service_interval_months || 'Not set'} months
                     </small>
@@ -1394,9 +1524,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </>
               )}
 
-              {/* ============================================================
-                  YEAR-BASED FIELDS - WITH FULL PREVIEW
-              ============================================================ */}
+              {/* YEAR-BASED FIELDS */}
               {showServiceForm.maintenance_type === 'year' && serviceData.maintenance_category === 'preventive' && (
                 <>
                   <div style={{ marginBottom: '20px' }}>
@@ -1420,7 +1548,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                       style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px' }}
                     />
                     <small style={{ color: '#666', display: 'block', marginTop: '5px' }}>
-                      <strong>Enter the number of years until next service (NO fixed default)</strong>
+                      <strong>Enter the number of years until next service</strong>
                       <br />
                       Current interval in database: {showServiceForm.service_interval_years || 'Not set'} years
                     </small>
@@ -1495,7 +1623,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
                 </>
               )}
 
-              {/* CORRECTIVE INFO - SHOW WHEN CORRECTIVE IS SELECTED */}
+              {/* CORRECTIVE INFO */}
               {serviceData.maintenance_category === 'corrective' && (
                 <div style={{ 
                   marginBottom: '20px', 
