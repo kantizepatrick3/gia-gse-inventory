@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_URL } from '../api/config';
 
 const Dashboard = ({ token, user }) => {
   const [lowStockParts, setLowStockParts] = useState([]);
@@ -12,7 +13,7 @@ const Dashboard = ({ token, user }) => {
     pendingApprovals: 0
   });
 
-  const API_URL = 'https://gia-gse-inventory.onrender.com';
+  // API_URL is now imported from config - remove the local declaration
 
   useEffect(() => {
     fetchDashboardData();
@@ -24,13 +25,13 @@ const Dashboard = ({ token, user }) => {
       
       // Run ALL API calls in PARALLEL - this is the key performance fix!
       const promises = [
-        axios.get(`${API_URL}/api/reports/low-stock`, {
+        axios.get(`${API_URL}/reports/low-stock`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        axios.get(`${API_URL}/api/gse-maintenance`, {
+        axios.get(`${API_URL}/gse-maintenance`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        axios.get(`${API_URL}/api/parts`, {
+        axios.get(`${API_URL}/parts`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ];
@@ -39,7 +40,7 @@ const Dashboard = ({ token, user }) => {
       const isApprover = user?.role === 'admin' || user?.role === 'manager';
       if (isApprover) {
         promises.push(
-          axios.get(`${API_URL}/api/requests/pending`, {
+          axios.get(`${API_URL}/requests/pending`, {
             headers: { Authorization: `Bearer ${token}` }
           })
         );
