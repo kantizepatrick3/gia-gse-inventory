@@ -95,9 +95,6 @@ const Dashboard = ({ token, user }) => {
     }
   };
 
-  // ============================================================
-  // NIRO FORMAT: Remaining Display
-  // ============================================================
   const getRemainingDisplay = (item) => {
     if (item.maintenance_type === 'hour') {
       const hrs = item.remaining_hours || 0;
@@ -161,7 +158,7 @@ const Dashboard = ({ token, user }) => {
   };
 
   // ============================================================
-  // NIRO FORMAT: Alert Reason - Shows the CLOSEST threshold
+  // EXACT ALERT REASON - Shows the specific reason for Due Soon or Overdue
   // ============================================================
   const getAlertReason = (item) => {
     // If API provides alert_reason, use it first
@@ -173,55 +170,87 @@ const Dashboard = ({ token, user }) => {
     if (item.maintenance_type === 'hour') {
       const hrs = item.remaining_hours || 0;
       const days = item.days_remaining || 0;
+      const currentHours = item.current_hours || 0;
+      const targetHours = item.target_hours || item.service_interval_hours || 0;
+      const hoursRemaining = targetHours - currentHours;
       
-      // OVERDUE
+      // ============================================================
+      // OVERDUE - EXACT REASON
+      // ============================================================
       if (item.status === 'overdue') {
+        // BOTH hours AND date are overdue
         if (hrs <= 0 && days <= 0) {
-          return 'Both hours and date overdue';
-        } else if (hrs <= 0) {
-          return 'Hours exceeded target';
-        } else if (days <= 0) {
-          return 'Service date passed';
+          return 'BOTH hours target exceeded AND service date passed';
+        }
+        // Hours exceeded target, but date still has time
+        else if (hrs <= 0 && days > 0) {
+          return `Hours target exceeded by ${Math.abs(hrs)} hours (date target still has ${days} days)`;
+        }
+        // Date passed, but hours still have time
+        else if (days <= 0 && hrs > 0) {
+          return `Service date passed by ${Math.abs(days)} days (hour target still has ${hrs} hours)`;
+        }
+        // Only hours exceeded
+        else if (hrs <= 0) {
+          return `Hours target exceeded by ${Math.abs(hrs)} hours`;
+        }
+        // Only date passed
+        else if (days <= 0) {
+          return `Service date passed by ${Math.abs(days)} days`;
         }
         return 'Overdue';
       }
       
-      // DUE SOON - Show the CLOSEST threshold (NIRO format)
+      // ============================================================
+      // DUE SOON - EXACT REASON
+      // ============================================================
       if (item.status === 'due_soon') {
         const isDueSoonDays = days > 0 && days <= 4;
         const isDueSoonHours = hrs > 0 && hrs <= 40;
 
-        if (hrs > 0 && days > 0) {
-          // Check which is CLOSER to target
-          const hoursToDays = hrs / 24;
-          if (hoursToDays < days) {
-            // Hours target is closer
-            return `${hrs} hours to target`;
-          } else {
-            // Days target is closer
-            return `${days} days to target`;
-          }
+        // BOTH conditions are within threshold
+        if (isDueSoonDays && isDueSoonHours) {
+          return `Both conditions: ${hrs} hours remaining (≤ 40 hrs) AND ${days} days remaining (≤ 4 days)`;
+        }
+        // Only days condition triggered
+        else if (isDueSoonDays) {
+          return `${days} days remaining (≤ 4 days to target)`;
+        }
+        // Only hours condition triggered
+        else if (isDueSoonHours) {
+          return `${hrs} hours remaining (≤ 40 hours to target)`;
+        }
+        // Both exist but outside threshold - shouldn't happen for due_soon
+        else if (hrs > 0 && days > 0) {
+          return `${hrs} hours / ${days} days remaining`;
         } else if (hrs > 0) {
-          return `${hrs} hours to target`;
+          return `${hrs} hours remaining`;
         } else if (days > 0) {
-          return `${days} days to target`;
+          return `${days} days remaining`;
         }
         return 'Due soon';
       }
     }
 
-    // Month-based maintenance
+    // ============================================================
+    // MONTH-BASED - EXACT REASON
+    // ============================================================
     if (item.maintenance_type === 'month') {
       const days = item.days_remaining || 0;
       if (item.status === 'overdue') {
-        return `${Math.abs(days)} days overdue`;
+        return `Service date passed by ${Math.abs(days)} days`;
       }
       if (item.status === 'due_soon') {
-        return `${days} days to target`;
+        if (days <= 4) {
+          return `${days} days remaining (≤ 4 days to target)`;
+        }
+        return `${days} days remaining`;
       }
     }
 
-    // Year-based maintenance
+    // ============================================================
+    // YEAR-BASED - EXACT REASON
+    // ============================================================
     if (item.maintenance_type === 'year') {
       const days = item.days_remaining_year || 0;
       const years = item.years_remaining || 0;
@@ -229,8 +258,11 @@ const Dashboard = ({ token, user }) => {
         return `${Math.abs(years)} years overdue`;
       }
       if (item.status === 'due_soon') {
+        if (days > 0 && days <= 4) {
+          return `${days} days remaining (≤ 4 days to target)`;
+        }
         if (days > 0 && days < 365) {
-          return `${days} days to target`;
+          return `${days} days remaining this year`;
         }
         return 'Due this year';
       }
@@ -450,7 +482,7 @@ const Dashboard = ({ token, user }) => {
         )}
       </div>
 
-      {/* Maintenance Alerts Section - NIRO Format */}
+      {/* Maintenance Alerts Section - EXACT REASON */}
       <div style={{
         backgroundColor: '#f9f9f9',
         borderRadius: '8px',
