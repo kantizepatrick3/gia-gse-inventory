@@ -615,11 +615,10 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     if (eq.maintenance_type === 'none') return '⚪ No maintenance';
     
     if (eq.maintenance_type === 'hour') {
-      const hrs = eq.remaining_hours || 0;
-      const days = eq.days_remaining || 0;
       const targetHours = eq.target_hours || eq.service_interval_hours || 0;
       const currentHours = eq.current_hours || 0;
-      const hoursRemaining = targetHours - currentHours;
+      const hrs = targetHours - currentHours;
+      const days = eq.days_remaining || 0;
       
       // OVERDUE
       if (eq.status === 'overdue') {
@@ -680,7 +679,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   };
 
   // ============================================================
-  // FIXED: ALERT REASON - Shows the TRIGGERING condition
+  // FIXED: ALERT REASON - Calculates hours remaining directly from current/target
   // ============================================================
   const getAlertReason = (eq) => {
     // DO NOT use API's alert_reason - we want our custom logic
@@ -698,11 +697,14 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     if (eq.maintenance_type === 'none') return '';
 
     if (eq.maintenance_type === 'hour') {
-      const hrs = eq.remaining_hours || 0;
-      const days = eq.days_remaining || 0;
+      // ============================================================
+      // CALCULATE HOURS REMAINING DIRECTLY from current and target
+      // ============================================================
       const targetHours = eq.target_hours || eq.service_interval_hours || 0;
       const currentHours = eq.current_hours || 0;
-      const hoursRemaining = targetHours - currentHours;
+      const hrs = targetHours - currentHours; // Calculate hours remaining directly
+      const days = eq.days_remaining || 0;
+      
       const absHrs = Math.abs(hrs);
       const absDays = Math.abs(days);
 
