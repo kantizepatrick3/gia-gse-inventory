@@ -95,9 +95,6 @@ const Dashboard = ({ token, user }) => {
     }
   };
 
-  // ============================================================
-  // REMAINING COLUMN - Shows days and hours remaining
-  // ============================================================
   const getRemainingDisplay = (item) => {
     if (item.maintenance_type === 'hour') {
       const targetHours = item.target_hours || item.service_interval_hours || 0;
@@ -163,10 +160,10 @@ const Dashboard = ({ token, user }) => {
   };
 
   // ============================================================
-  // FIXED: ALERT REASON - Calculates directly, ignores API alert_reason
+  // FIXED: ALERT REASON - SAME AS GSEMAINTENANCE
   // ============================================================
   const getAlertReason = (item) => {
-    // DO NOT use API's alert_reason - we want our custom logic
+    // FORCE: Ignore API alert_reason - use our custom calculation
     // if (item.alert_reason) {
     //   return item.alert_reason;
     // }
@@ -179,7 +176,7 @@ const Dashboard = ({ token, user }) => {
     if (item.maintenance_type === 'none') return '';
 
     if (item.maintenance_type === 'hour') {
-      // CALCULATE HOURS REMAINING DIRECTLY from current and target
+      // Calculate hours remaining directly from current and target
       const targetHours = item.target_hours || item.service_interval_hours || 0;
       const currentHours = item.current_hours || 0;
       const hrs = targetHours - currentHours;
@@ -188,22 +185,15 @@ const Dashboard = ({ token, user }) => {
       const absDays = Math.abs(days);
       
       if (item.status === 'overdue') {
-        // BOTH hours AND date are overdue
         if (hrs <= 0 && days <= 0) {
           return `⚠️ ${absHrs} hrs & ${absDays} days overdue`;
-        }
-        // Only hours exceeded target
-        else if (hrs <= 0 && days > 0) {
+        } else if (hrs <= 0 && days > 0) {
           return `⚠️ ${absHrs} hrs overdue (${days} days to date)`;
-        }
-        // Only date passed
-        else if (days <= 0 && hrs > 0) {
+        } else if (days <= 0 && hrs > 0) {
           return `⚠️ ${absDays} days overdue (${hrs} hrs to target)`;
-        }
-        else if (hrs <= 0) {
+        } else if (hrs <= 0) {
           return `⚠️ ${absHrs} hrs overdue`;
-        }
-        else if (days <= 0) {
+        } else if (days <= 0) {
           return `⚠️ ${absDays} days overdue`;
         }
         return '⚠️ Overdue';
@@ -225,14 +215,12 @@ const Dashboard = ({ token, user }) => {
         else if (isDueSoonHours) {
           return `🔔 ${hrs} hrs to target`;
         }
-        // Both exist but outside threshold - show the closer one
+        // Both exist but outside threshold
         else if (hrs > 0 && days > 0) {
           return `🔔 ${days} days / ${hrs} hrs remaining`;
-        }
-        else if (hrs > 0) {
+        } else if (hrs > 0) {
           return `🔔 ${hrs} hrs to target`;
-        }
-        else if (days > 0) {
+        } else if (days > 0) {
           return `🔔 ${days} days to service date`;
         }
         return '🔔 Due Soon';
