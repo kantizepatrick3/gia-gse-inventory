@@ -609,7 +609,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   };
 
   // ============================================================
-  // FIXED: Get Remaining Display - Shows both hours AND days
+  // REMAINING DISPLAY - Shows both hours AND days
   // ============================================================
   const getRemainingDisplay = (eq) => {
     if (eq.maintenance_type === 'none') return '⚪ No maintenance';
@@ -680,7 +680,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   };
 
   // ============================================================
-  // FIXED: Alert Reason - Shows EXACT reason WITHOUT API override
+  // FIXED: ALERT REASON - Shows CLOSEST threshold (hours OR days)
   // ============================================================
   const getAlertReason = (eq) => {
     // DO NOT use API's alert_reason - we want our custom logic
@@ -696,41 +696,72 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       const targetHours = eq.target_hours || eq.service_interval_hours || 0;
       const currentHours = eq.current_hours || 0;
       const hoursRemaining = targetHours - currentHours;
+      const absHrs = Math.abs(hrs);
+      const absDays = Math.abs(days);
 
       // OVERDUE
       if (eq.status === 'overdue') {
+        // BOTH overdue
         if (hrs <= 0 && days <= 0) {
-          return `⚠️ ${Math.abs(hrs)} hrs overdue & ${Math.abs(days)} days overdue`;
-        } else if (hrs <= 0 && days > 0) {
-          return `⚠️ ${Math.abs(hrs)} hrs overdue (date has ${days} days)`;
-        } else if (days <= 0 && hrs > 0) {
-          return `⚠️ ${Math.abs(days)} days overdue (hours have ${hrs} hrs)`;
-        } else if (hrs <= 0) {
-          return `⚠️ ${Math.abs(hrs)} hrs overdue`;
-        } else if (days <= 0) {
-          return `⚠️ ${Math.abs(days)} days overdue`;
+          return `⚠️ ${absHrs} hrs & ${absDays} days overdue`;
+        }
+        // Only hours overdue
+        else if (hrs <= 0 && days > 0) {
+          return `⚠️ ${absHrs} hrs overdue (${days} days to date)`;
+        }
+        // Only days overdue
+        else if (days <= 0 && hrs > 0) {
+          return `⚠️ ${absDays} days overdue (${hrs} hrs to target)`;
+        }
+        else if (hrs <= 0) {
+          return `⚠️ ${absHrs} hrs overdue`;
+        }
+        else if (days <= 0) {
+          return `⚠️ ${absDays} days overdue`;
         }
         return '⚠️ Overdue';
       }
 
-      // DUE SOON - Show threshold
+      // DUE SOON - Show CLOSEST threshold
       if (eq.status === 'due_soon') {
         const isDueSoonDays = days > 0 && days <= 4;
         const isDueSoonHours = hrs > 0 && hrs <= 40;
 
-        if (hrs > 0 && days > 0) {
-          if (isDueSoonDays && isDueSoonHours) {
-            return `🔔 ${hrs} hrs & ${days} days to target`;
-          } else if (isDueSoonDays) {
+        // BOTH conditions are within threshold - show the CLOSEST (smaller value)
+        if (isDueSoonDays && isDueSoonHours) {
+          // Compare which is closer to threshold
+          const daysRatio = days / 4;      // 0 = due, 1 = threshold
+          const hoursRatio = hrs / 40;     // 0 = due, 1 = threshold
+          
+          // Show the one that's closer to due (smaller ratio)
+          if (daysRatio <= hoursRatio) {
             return `🔔 ${days} days to service date`;
-          } else if (isDueSoonHours) {
+          } else {
             return `🔔 ${hrs} hrs to target`;
           }
-          return `🔔 ${hrs} hrs / ${days} days remaining`;
-        } else if (hrs > 0) {
-          return isDueSoonHours ? `🔔 ${hrs} hrs to target` : `🔔 ${hrs} hrs remaining`;
-        } else if (days > 0) {
-          return isDueSoonDays ? `🔔 ${days} days to service date` : `🔔 ${days} days remaining`;
+        }
+        // Only days condition triggered
+        else if (isDueSoonDays) {
+          return `🔔 ${days} days to service date`;
+        }
+        // Only hours condition triggered
+        else if (isDueSoonHours) {
+          return `🔔 ${hrs} hrs to target`;
+        }
+        // Both exist but outside threshold - shouldn't happen for due_soon
+        else if (hrs > 0 && days > 0) {
+          // Show the closer one
+          if (days < hrs / 10) {
+            return `🔔 ${days} days to service date`;
+          } else {
+            return `🔔 ${hrs} hrs to target`;
+          }
+        }
+        else if (hrs > 0) {
+          return `🔔 ${hrs} hrs to target`;
+        }
+        else if (days > 0) {
+          return `🔔 ${days} days to service date`;
         }
         return '🔔 Due Soon';
       }
@@ -739,8 +770,9 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     // Month-based
     if (eq.maintenance_type === 'month') {
       const days = eq.days_remaining || 0;
+      const absDays = Math.abs(days);
       if (eq.status === 'overdue') {
-        return `⚠️ ${Math.abs(days)} days overdue`;
+        return `⚠️ ${absDays} days overdue`;
       }
       if (eq.status === 'due_soon') {
         return days <= 4 ? `🔔 ${days} days to service date` : `🔔 ${days} days remaining`;
@@ -751,10 +783,11 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     if (eq.maintenance_type === 'year') {
       const days = eq.days_remaining_year || 0;
       const years = eq.years_remaining || 0;
-      const months = Math.floor(days / 30);
+      const absYears = Math.abs(years);
+      const months = Math.floor(Math.abs(days) / 30);
       
       if (eq.status === 'overdue') {
-        return `⚠️ ${Math.abs(years)} yrs overdue`;
+        return `⚠️ ${absYears} yrs overdue`;
       }
       if (eq.status === 'due_soon') {
         if (months > 0) {
