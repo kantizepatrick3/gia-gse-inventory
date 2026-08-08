@@ -679,7 +679,7 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   };
 
   // ============================================================
-  // FIXED: ALERT REASON - Calculates hours remaining directly from current/target
+  // FIXED: ALERT REASON - Shows BOTH when both conditions are triggering
   // ============================================================
   const getAlertReason = (eq) => {
     // DO NOT use API's alert_reason - we want our custom logic
@@ -737,30 +737,25 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
         const isDueSoonHours = hrs > 0 && hrs <= 40;
 
         // ============================================================
-        // PRIORITY: Show the condition that is TRIGGERING the alert
+        // BOTH conditions are triggering - show BOTH
         // ============================================================
+        if (isDueSoonDays && isDueSoonHours) {
+          return `🔔 ${days} days to service date & ${hrs} hrs to target`;
+        }
         
-        // If hours is within threshold (≤40), show hours (EVEN if days also within threshold)
+        // Only hours within threshold
         if (isDueSoonHours) {
           return `🔔 ${hrs} hrs to target`;
         }
         
-        // If days is within threshold (≤4), show days
+        // Only days within threshold
         if (isDueSoonDays) {
           return `🔔 ${days} days to service date`;
         }
         
         // If neither is within threshold (shouldn't happen for due_soon), show the closer one
         if (hrs > 0 && days > 0) {
-          // Compare which is closer to its threshold
-          const daysRatio = days / 4;
-          const hoursRatio = hrs / 40;
-          
-          if (daysRatio <= hoursRatio && days > 0) {
-            return `🔔 ${days} days to service date`;
-          } else if (hrs > 0) {
-            return `🔔 ${hrs} hrs to target`;
-          }
+          return `🔔 ${days} days / ${hrs} hrs remaining`;
         }
         else if (hrs > 0) {
           return `🔔 ${hrs} hrs to target`;
