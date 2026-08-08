@@ -100,35 +100,37 @@ const Dashboard = ({ token, user }) => {
   // ============================================================
   const getRemainingDisplay = (item) => {
     if (item.maintenance_type === 'hour') {
-      const hrs = Math.abs(item.remaining_hours || 0);
-      const days = Math.abs(item.days_remaining || 0);
+      const targetHours = item.target_hours || item.service_interval_hours || 0;
+      const currentHours = item.current_hours || 0;
+      const hrs = targetHours - currentHours;
+      const days = item.days_remaining || 0;
       
       if (item.status === 'overdue') {
-        if (hrs > 0 && days > 0) {
-          return `${days} days ${hrs} hrs overdue`;
-        } else if (hrs > 0) {
-          return `${hrs} hrs overdue`;
-        } else if (days > 0) {
-          return `${days} days overdue`;
+        if (hrs <= 0 && days <= 0) {
+          return `${Math.abs(hrs)} hrs & ${Math.abs(days)} days overdue`;
+        } else if (hrs <= 0) {
+          return `${Math.abs(hrs)} hrs overdue`;
+        } else if (days <= 0) {
+          return `${Math.abs(days)} days overdue`;
         }
         return 'Overdue';
       }
       if (item.status === 'due_soon') {
         if (hrs > 0 && days > 0) {
-          return `${days} days ${hrs} hrs remaining`;
+          return `${hrs} hours / ${days} days remaining - DUE SOON!`;
         } else if (hrs > 0) {
-          return `${hrs} hrs remaining`;
+          return `${hrs} hours remaining - DUE SOON!`;
         } else if (days > 0) {
-          return `${days} days remaining`;
+          return `${days} days remaining - DUE SOON!`;
         }
         return 'Due soon';
       }
       if (hrs > 0 && days > 0) {
-        return `${days} days ${hrs} hrs`;
+        return `${hrs} hours / ${days} days remaining`;
       } else if (hrs > 0) {
-        return `${hrs} hrs`;
+        return `${hrs} hours remaining`;
       } else if (days > 0) {
-        return `${days} days`;
+        return `${days} days remaining`;
       }
       return 'Up to date';
     } else if (item.maintenance_type === 'month') {
@@ -137,7 +139,7 @@ const Dashboard = ({ token, user }) => {
         return `${days} days overdue`;
       }
       if (item.status === 'due_soon') {
-        return `${days} days remaining`;
+        return `${days} days remaining - DUE SOON!`;
       }
       return `${days} days`;
     } else if (item.maintenance_type === 'year') {
@@ -148,7 +150,7 @@ const Dashboard = ({ token, user }) => {
       }
       if (item.status === 'due_soon') {
         if (days > 0 && days <= 365) {
-          return `${days} days remaining`;
+          return `${days} days remaining - DUE SOON!`;
         }
         return 'Due this year';
       }
@@ -161,12 +163,26 @@ const Dashboard = ({ token, user }) => {
   };
 
   // ============================================================
-  // ALERT REASON - Shows exactly what is causing the alert
+  // FIXED: ALERT REASON - Calculates directly, ignores API alert_reason
   // ============================================================
   const getAlertReason = (item) => {
-    // For hour-based maintenance
+    // DO NOT use API's alert_reason - we want our custom logic
+    // if (item.alert_reason) {
+    //   return item.alert_reason;
+    // }
+
+    // SERVICED / Up to date - Show NO alert reason
+    if (item.status === 'serviced' || item.status === 'no_maintenance') {
+      return '';
+    }
+
+    if (item.maintenance_type === 'none') return '';
+
     if (item.maintenance_type === 'hour') {
-      const hrs = item.remaining_hours || 0;
+      // CALCULATE HOURS REMAINING DIRECTLY from current and target
+      const targetHours = item.target_hours || item.service_interval_hours || 0;
+      const currentHours = item.current_hours || 0;
+      const hrs = targetHours - currentHours;
       const days = item.days_remaining || 0;
       const absHrs = Math.abs(hrs);
       const absDays = Math.abs(days);
@@ -174,15 +190,21 @@ const Dashboard = ({ token, user }) => {
       if (item.status === 'overdue') {
         // BOTH hours AND date are overdue
         if (hrs <= 0 && days <= 0) {
-          return `⚠️ Service date overdue by ${absDays} days & Hours overdue by ${absHrs} hrs`;
+          return `⚠️ ${absHrs} hrs & ${absDays} days overdue`;
         }
         // Only hours exceeded target
-        else if (hrs <= 0) {
-          return `⚠️ Hours overdue by ${absHrs} hrs`;
+        else if (hrs <= 0 && days > 0) {
+          return `⚠️ ${absHrs} hrs overdue (${days} days to date)`;
         }
         // Only date passed
+        else if (days <= 0 && hrs > 0) {
+          return `⚠️ ${absDays} days overdue (${hrs} hrs to target)`;
+        }
+        else if (hrs <= 0) {
+          return `⚠️ ${absHrs} hrs overdue`;
+        }
         else if (days <= 0) {
-          return `⚠️ Service date overdue by ${absDays} days`;
+          return `⚠️ ${absDays} days overdue`;
         }
         return '⚠️ Overdue';
       }
@@ -191,7 +213,7 @@ const Dashboard = ({ token, user }) => {
         const isDueSoonDays = days > 0 && days <= 4;
         const isDueSoonHours = hrs > 0 && hrs <= 40;
 
-        // BOTH conditions are within threshold
+        // BOTH conditions are triggering - show BOTH
         if (isDueSoonDays && isDueSoonHours) {
           return `🔔 ${days} days to service date & ${hrs} hrs to target`;
         }
@@ -203,43 +225,64 @@ const Dashboard = ({ token, user }) => {
         else if (isDueSoonHours) {
           return `🔔 ${hrs} hrs to target`;
         }
+        // Both exist but outside threshold - show the closer one
+        else if (hrs > 0 && days > 0) {
+          return `🔔 ${days} days / ${hrs} hrs remaining`;
+        }
+        else if (hrs > 0) {
+          return `🔔 ${hrs} hrs to target`;
+        }
+        else if (days > 0) {
+          return `🔔 ${days} days to service date`;
+        }
         return '🔔 Due Soon';
       }
     }
 
-    // Month-based maintenance
+    // Month-based
     if (item.maintenance_type === 'month') {
       const days = item.days_remaining || 0;
       const absDays = Math.abs(days);
-      
+      if (item.status === 'serviced' || item.status === 'no_maintenance') {
+        return '';
+      }
       if (item.status === 'overdue') {
-        return `⚠️ Service date overdue by ${absDays} days`;
+        return `⚠️ ${absDays} days overdue`;
       }
       if (item.status === 'due_soon') {
-        return `🔔 ${days} days to service date`;
+        return days <= 4 ? `🔔 ${days} days to service date` : `🔔 ${days} days remaining`;
       }
     }
 
-    // Year-based maintenance
+    // Year-based
     if (item.maintenance_type === 'year') {
       const days = item.days_remaining_year || 0;
-      const absDays = Math.abs(days);
-      const months = Math.floor(absDays / 30);
-      const remainingDays = absDays % 30;
+      const years = item.years_remaining || 0;
+      const absYears = Math.abs(years);
+      const months = Math.floor(Math.abs(days) / 30);
       
+      if (item.status === 'serviced' || item.status === 'no_maintenance') {
+        return '';
+      }
       if (item.status === 'overdue') {
-        return `⚠️ Service date overdue`;
+        return `⚠️ ${absYears} yrs overdue`;
       }
       if (item.status === 'due_soon') {
-        // If more than 30 days, show months
-        if (months > 0 && remainingDays === 0) {
+        if (months > 0) {
           return `🔔 ${months} month${months > 1 ? 's' : ''} to service date`;
-        } else if (months > 0 && remainingDays > 0) {
-          return `🔔 ${months} month${months > 1 ? 's' : ''} ${remainingDays} days to service date`;
         }
-        // Less than 30 days, show days
-        return `🔔 ${days} days to service date`;
+        if (days > 0 && days <= 4) {
+          return `🔔 ${days} days to service date`;
+        }
+        if (days > 0 && days < 365) {
+          return `🔔 ${days} days remaining this year`;
+        }
+        return '🔔 Due this year';
       }
+    }
+
+    if (item.status === 'serviced' || item.status === 'no_maintenance') {
+      return '';
     }
 
     return item.status === 'overdue' ? '⚠️ Overdue' : '🔔 Due Soon';
@@ -456,7 +499,7 @@ const Dashboard = ({ token, user }) => {
         )}
       </div>
 
-      {/* Maintenance Alerts Section */}
+      {/* Maintenance Alerts Section - FIXED */}
       <div style={{
         backgroundColor: '#f9f9f9',
         borderRadius: '8px',
@@ -502,7 +545,7 @@ const Dashboard = ({ token, user }) => {
                         {remainingDisplay}
                       </td>
                       <td style={{ border: '1px solid #ddd', padding: '8px', fontSize: '12px', color: statusStyle.color, fontWeight: 'bold' }}>
-                        {alertReason || 'No alert reason available'}
+                        {alertReason || '✅ Up to date'}
                       </td>
                       <td style={{ border: '1px solid #ddd', padding: '8px' }}>
                         <span style={{ color: statusStyle.color, fontWeight: 'bold' }}>{statusStyle.text}</span>
