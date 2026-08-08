@@ -680,13 +680,13 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
   };
 
   // ============================================================
-  // FIXED: Get Alert Reason - Shows threshold information
+  // FIXED: Alert Reason - Shows EXACT reason WITHOUT API override
   // ============================================================
   const getAlertReason = (eq) => {
-    // If API provides alert_reason, use it first
-    if (eq.alert_reason) {
-      return eq.alert_reason;
-    }
+    // DO NOT use API's alert_reason - we want our custom logic
+    // if (eq.alert_reason) {
+    //   return eq.alert_reason;
+    // }
 
     if (eq.maintenance_type === 'none') return 'No maintenance required';
 
@@ -700,17 +700,17 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
       // OVERDUE
       if (eq.status === 'overdue') {
         if (hrs <= 0 && days <= 0) {
-          return '⚠️ BOTH hours AND date are overdue!';
+          return `⚠️ ${Math.abs(hrs)} hrs overdue & ${Math.abs(days)} days overdue`;
         } else if (hrs <= 0 && days > 0) {
-          return `🚨 ${Math.abs(hrs)} hours OVERDUE (${days} days to date)`;
+          return `⚠️ ${Math.abs(hrs)} hrs overdue (date has ${days} days)`;
         } else if (days <= 0 && hrs > 0) {
-          return `📅 ${Math.abs(days)} days OVERDUE (${hrs} hrs to target)`;
+          return `⚠️ ${Math.abs(days)} days overdue (hours have ${hrs} hrs)`;
         } else if (hrs <= 0) {
-          return `⏱️ ${Math.abs(hrs)} hours OVERDUE`;
+          return `⚠️ ${Math.abs(hrs)} hrs overdue`;
         } else if (days <= 0) {
-          return `📅 ${Math.abs(days)} days OVERDUE`;
+          return `⚠️ ${Math.abs(days)} days overdue`;
         }
-        return '🔴 OVERDUE';
+        return '⚠️ Overdue';
       }
 
       // DUE SOON - Show threshold
@@ -720,19 +720,19 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
 
         if (hrs > 0 && days > 0) {
           if (isDueSoonDays && isDueSoonHours) {
-            return `DUE SOON! (${hrs} hours / ${days} days to target)`;
+            return `🔔 ${hrs} hrs & ${days} days to target`;
           } else if (isDueSoonDays) {
-            return `DUE SOON! (≤ 4 days to target, ${hrs} hrs also)`;
+            return `🔔 ${days} days to service date`;
           } else if (isDueSoonHours) {
-            return `DUE SOON! (≤ 40 hours to target, ${days} days also)`;
+            return `🔔 ${hrs} hrs to target`;
           }
-          return `DUE SOON! (${hrs} hrs / ${days} days remaining)`;
+          return `🔔 ${hrs} hrs / ${days} days remaining`;
         } else if (hrs > 0) {
-          return isDueSoonHours ? `DUE SOON! (≤ 40 hours to target)` : `DUE SOON! (${hrs} hrs remaining)`;
+          return isDueSoonHours ? `🔔 ${hrs} hrs to target` : `🔔 ${hrs} hrs remaining`;
         } else if (days > 0) {
-          return isDueSoonDays ? `DUE SOON! (≤ 4 days to target)` : `DUE SOON! (${days} days remaining)`;
+          return isDueSoonDays ? `🔔 ${days} days to service date` : `🔔 ${days} days remaining`;
         }
-        return '🟡 DUE SOON';
+        return '🔔 Due Soon';
       }
     }
 
@@ -740,10 +740,10 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     if (eq.maintenance_type === 'month') {
       const days = eq.days_remaining || 0;
       if (eq.status === 'overdue') {
-        return `📅 ${Math.abs(days)} days OVERDUE`;
+        return `⚠️ ${Math.abs(days)} days overdue`;
       }
       if (eq.status === 'due_soon') {
-        return days <= 4 ? `DUE SOON! (≤ 4 days to target)` : `DUE SOON! (${days} days remaining)`;
+        return days <= 4 ? `🔔 ${days} days to service date` : `🔔 ${days} days remaining`;
       }
     }
 
@@ -751,21 +751,26 @@ const GSEMaintenance = ({ token, user, onMaintenanceUpdate }) => {
     if (eq.maintenance_type === 'year') {
       const days = eq.days_remaining_year || 0;
       const years = eq.years_remaining || 0;
+      const months = Math.floor(days / 30);
+      
       if (eq.status === 'overdue') {
-        return `📆 ${Math.abs(years)} years OVERDUE`;
+        return `⚠️ ${Math.abs(years)} yrs overdue`;
       }
       if (eq.status === 'due_soon') {
+        if (months > 0) {
+          return `🔔 ${months} month${months > 1 ? 's' : ''} to service date`;
+        }
         if (days > 0 && days <= 4) {
-          return `DUE SOON! (≤ 4 days to target this year)`;
+          return `🔔 ${days} days to service date`;
         }
         if (days > 0 && days < 365) {
-          return `DUE SOON! (${days} days remaining this year)`;
+          return `🔔 ${days} days remaining this year`;
         }
-        return 'DUE SOON! (Due this year)';
+        return '🔔 Due this year';
       }
     }
 
-    return '';
+    return eq.status === 'overdue' ? '⚠️ Overdue' : '🔔 Due Soon';
   };
 
   const getMonthPreview = (serviceDate, monthsInterval) => {
